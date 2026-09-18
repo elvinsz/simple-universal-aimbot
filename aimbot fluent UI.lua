@@ -141,8 +141,9 @@ end
 
 --> [< SILENT AIM >] <--
 
-local silentAimConnection = nil
-local originalNamecall = nil
+
+local silentAimHookActive = false
+local oldNamecall = nil
 local metaTable = nil
 
 local function getSilentAimTarget()
@@ -182,55 +183,72 @@ local function getSilentAimTarget()
 end
 
 local function enableSilentAim()
-    if silentAimConnection then return end
+    if silentAimHookActive then return end
     
-    local success = pcall(function()
+    local success, err = pcall(function()
         metaTable = getrawmetatable(game)
-        originalNamecall = metaTable.__namecall
+        oldNamecall = metaTable.__namecall
         setreadonly(metaTable, false)
         
-        metaTable.__namecall = newcclosure(function(self, ...)
+        metaTable.__namecall = function(self, ...)
             local method = getnamecallmethod()
             
-            if silentAimSettings.Enabled and method == "Raycast" and self == Workspace then
-                if math.random(0, 100) <= silentAimSettings.HitChance then
-                    local targetPart = getSilentAimTarget()
-                    if targetPart then
-                        local args = {...}
-                        local origin = args[1]
-                        local dir = (targetPart.Position - origin).Unit * args[2].Magnitude
-                        args[2] = dir
-                        return originalNamecall(self, unpack(args))
+            -- Перехватываем ТОЛЬКО Raycast на Workspace
+            if method == "Raycast" and self == Workspace then
+                local args = {...}
+                
+                -- Проверяем типы аргументов
+                if #args >= 2 
+                   and typeof(args[1]) == "Vector3" 
+                   and typeof(args[2]) == "Vector3" 
+                   and silentAimSettings.Enabled then
+                    
+                    -- ⭐ ФИЛЬТР: только Raycast от персонажа игрока
+                    local origin = args[1]
+                    local myChar = LocalPlayer.Character
+                    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                    
+                    if myRoot and (origin - myRoot.Position).Magnitude < 15 then
+                        -- Это Raycast от игрока — можно модифицировать
+                        local ok, target = pcall(getSilentAimTarget)
+                        if ok and target and math.random(1, 100) <= silentAimSettings.HitChance then
+                            local newDir = target.Position - origin
+                            if newDir.Magnitude > 0.01 then
+                                args[2] = newDir.Unit * args[2].Magnitude
+                            end
+                        end
                     end
+                    
+                    -- Возвращаем (модифицированный или оригинальный)
+                    return oldNamecall(self, unpack(args))
                 end
             end
             
-            return originalNamecall(self, ...)
-        end)
+            return oldNamecall(self, ...)
+        end
         
         setreadonly(metaTable, true)
-        silentAimConnection = true
-        print("✅ Silent Aim хук установлен")
+        silentAimHookActive = true
+        print("✅ Silent Aim хук установлен (безопасный режим)")
     end)
     
     if not success then
-        warn("❌ Silent Aim не поддерживается инжектором (getrawmetatable)")
+        warn("❌ Silent Aim не поддерживается: " .. tostring(err))
         silentAimSettings.Enabled = false
     end
 end
 
 local function disableSilentAim()
-    if metaTable and originalNamecall then
+    if metaTable and oldNamecall then
         pcall(function()
             setreadonly(metaTable, false)
-            metaTable.__namecall = originalNamecall
+            metaTable.__namecall = oldNamecall
             setreadonly(metaTable, true)
         end)
     end
-    silentAimConnection = nil
+    silentAimHookActive = false
     print("✅ Silent Aim хук снят")
 end
-
 --> [< ВИЗУАЛЬНЫЕ ФУНКЦИИ >] <--
 
 local function setXRay(enabled)
