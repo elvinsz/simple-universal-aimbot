@@ -1,5 +1,5 @@
 --[[
-    Universal Aimbot v3.1 (Fluent UI)
+    Universal Aimbot v3.2 (Fluent UI)
     GitHub: https://github.com/elvinsz/simple-universal-aimbot
     Функции: Aimbot, Silent Aim, Visual Effects, Server Tools, Пинг, Регион, Free Cursor
 ]]
@@ -41,7 +41,6 @@ local Mouse = LocalPlayer:GetMouse()
 --> [< НАСТРОЙКИ >] <--
 
 local settings = {
-    -- Aimbot
     fov = 300,
     smoothing = 0.15,
     prediction = 0.065,
@@ -59,8 +58,6 @@ local settings = {
     rainbowFov = false,
     fovColor = Color3.fromRGB(255, 0, 0),
     targetedColor = Color3.fromRGB(0, 255, 0),
-    
-    -- Visual
     xray = false,
     fullBright = false,
     nightVision = false,
@@ -71,7 +68,6 @@ local settings = {
     noFog = false
 }
 
--- Silent Aim настройки
 local silentAimSettings = {
     Enabled = false,
     TeamCheck = false,
@@ -108,7 +104,6 @@ local hue = 0
 local rainbowSpeed = 0.005
 local lightingHue = 0
 
--- FOV круг
 local fovCircle
 pcall(function()
     fovCircle = Drawing.new("Circle")
@@ -976,46 +971,36 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
---> [< СВОБОДНЫЙ КУРСОР ПРИ ОТКРЫТОМ МЕНЮ (ИСПРАВЛЕНО) >] <--
+--> [< СВОБОДНЫЙ КУРСОР ПРИ ОТКРЫТОМ МЕНЮ (ФИНАЛ) >] <--
 
-local originalMouseBehavior = UserInputService.MouseBehavior
-local originalMouseIcon = UserInputService.MouseIconEnabled
-local menuOpen = true
-local forceLocked = false
+local originalMouseBehavior = nil
+local originalMouseIcon = nil
+local menuOpen = false
+local initialized = false
+local fluentGuiRef = nil
 
--- Функция переключения
-local function setMenuState(state)
-    menuOpen = state
+-- Определяем "родное" поведение мыши игры (обычно LockCenter)
+task.spawn(function()
+    task.wait(2)
+    originalMouseBehavior = UserInputService.MouseBehavior
+    originalMouseIcon = UserInputService.MouseIconEnabled
     
-    if state then
-        -- Меню открыто → курсор свободен
-        forceLocked = false
-        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-        UserInputService.MouseIconEnabled = true
-    else
-        -- Меню закрыто → возвращаем управление игре
-        forceLocked = true
-        
-        -- Ждём 2 кадра, чтобы игра сама восстановила поведение
-        task.wait()
-        task.wait()
-        
-        -- Возвращаем исходное поведение
-        UserInputService.MouseBehavior = originalMouseBehavior
-        UserInputService.MouseIconEnabled = originalMouseIcon
-        forceLocked = false
+    if originalMouseBehavior == Enum.MouseBehavior.Default then
+        task.wait(3)
+        if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+            originalMouseBehavior = UserInputService.MouseBehavior
+            originalMouseIcon = UserInputService.MouseIconEnabled
+        else
+            originalMouseBehavior = Enum.MouseBehavior.LockCenter
+            originalMouseIcon = false
+        end
     end
-end
-
--- RightControl — переключение меню
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.RightControl then
-        setMenuState(not menuOpen)
-    end
+    
+    initialized = true
+    print("🖱️ Оригинальное поведение мыши: " .. tostring(originalMouseBehavior))
 end)
 
--- Отслеживание состояния GUI Fluent
+-- Находим Fluent GUI и следим за его Enabled
 task.spawn(function()
     task.wait(1.5)
     
@@ -1030,36 +1015,59 @@ task.spawn(function()
     end
     
     if fluentGui then
+        fluentGuiRef = fluentGui
+        menuOpen = fluentGui.Enabled
+        
         fluentGui:GetPropertyChangedSignal("Enabled"):Connect(function()
-            setMenuState(fluentGui.Enabled)
+            menuOpen = fluentGui.Enabled
         end)
-        setMenuState(fluentGui.Enabled)
-        print("✅ Свободный курсор подключён (GUI: " .. fluentGui.Name .. ")")
+        
+        print("✅ Fluent GUI: " .. fluentGui.Name .. " | Enabled: " .. tostring(menuOpen))
     else
         print("⚠️ Fluent GUI не найден — используется только RightControl")
     end
 end)
 
--- Постоянный контроль поведения мыши через BindToRenderStep с высоким приоритетом
-RunService:BindToRenderStep("MouseControl", Enum.RenderPriority.Camera.Value + 10, function()
+-- Fallback: проверка состояния каждые 0.2 сек
+task.spawn(function()
+    while task.wait(0.2) do
+        if fluentGuiRef then
+            menuOpen = fluentGuiRef.Enabled
+        end
+    end
+end)
+
+-- RightControl — переключение (Fluent сам меняет Enabled, мы подхватываем)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.RightControl then
+        task.wait(0.1)
+        if fluentGuiRef then
+            menuOpen = fluentGuiRef.Enabled
+        else
+            menuOpen = not menuOpen
+        end
+    end
+end)
+
+-- ⭐ ГЛАВНЫЙ ФОРС: максимальный приоритет (1999 = почти последний)
+RunService:BindToRenderStep("MouseControlForce", 1999, function()
     if menuOpen then
-        -- Меню открыто — форсим Default
-        if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
-            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-        end
-        if not UserInputService.MouseIconEnabled then
-            UserInputService.MouseIconEnabled = true
-        end
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        UserInputService.MouseIconEnabled = true
     else
-        -- Меню закрыто — форсим исходное поведение
-        if not forceLocked and originalMouseBehavior ~= Enum.MouseBehavior.Default then
-            if UserInputService.MouseBehavior ~= originalMouseBehavior then
-                UserInputService.MouseBehavior = originalMouseBehavior
-            end
-            if UserInputService.MouseIconEnabled ~= originalMouseIcon then
-                UserInputService.MouseIconEnabled = originalMouseIcon
-            end
+        if initialized and originalMouseBehavior and originalMouseBehavior ~= Enum.MouseBehavior.Default then
+            UserInputService.MouseBehavior = originalMouseBehavior
+            UserInputService.MouseIconEnabled = originalMouseIcon
         end
+    end
+end)
+
+-- ⭐ ДУБЛИРУЮЩИЙ ФОРС через Heartbeat
+RunService.Heartbeat:Connect(function()
+    if menuOpen then
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        UserInputService.MouseIconEnabled = true
     end
 end)
 
@@ -1087,12 +1095,12 @@ task.spawn(function()
 end)
 
 print("====================================")
-print("✅ Universal Aimbot v3.1 загружен!")
+print("✅ Universal Aimbot v3.2 загружен!")
 print("📁 Конфиги: workspace/UniversalAimbot/Configs")
 print("📶 Пинг: Player:GetNetworkPing()")
 print("🌍 Регион: через первого игрока")
 print("🎭 Silent Aim: " .. (silentAimConnection and "работает" or "не активен"))
-print("🖱️  Свободный курсор: BindToRenderStep (исправлено)")
+print("🖱️  Курсор: BindToRenderStep (1999) + Heartbeat")
 print("📌 RightControl - скрыть/показать меню")
 print("📌 \\ - активация аимбота")
 print("====================================")
