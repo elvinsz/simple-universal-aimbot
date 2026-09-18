@@ -1,6 +1,7 @@
 --[[
-    Universal Aimbot v2.2 (Fluent UI)
+    Universal Aimbot v3.0 (Fluent UI)
     GitHub: https://github.com/elvinsz/simple-universal-aimbot
+    Функции: Aimbot, Silent Aim, Visual Effects, ESP, Server Tools, Пинг, Регион
 ]]
 
 if getgenv().UniversalAimbotLoaded then
@@ -27,9 +28,11 @@ local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 local Lighting = game:GetService("Lighting")
 local TeleportService = game:GetService("TeleportService")
 local LocalizationService = game:GetService("LocalizationService")
+local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -38,6 +41,7 @@ local Mouse = LocalPlayer:GetMouse()
 --> [< НАСТРОЙКИ >] <--
 
 local settings = {
+    -- Aimbot
     fov = 300,
     smoothing = 0.15,
     prediction = 0.065,
@@ -55,6 +59,8 @@ local settings = {
     rainbowFov = false,
     fovColor = Color3.fromRGB(255, 0, 0),
     targetedColor = Color3.fromRGB(0, 255, 0),
+    
+    -- Visual
     xray = false,
     fullBright = false,
     nightVision = false,
@@ -63,6 +69,16 @@ local settings = {
     noSunRays = false,
     rainbowLighting = false,
     noFog = false
+}
+
+-- Silent Aim настройки
+local silentAimSettings = {
+    Enabled = false,
+    TeamCheck = false,
+    VisibleCheck = false,
+    TargetPart = "HumanoidRootPart",
+    FOVRadius = 130,
+    HitChance = 100
 }
 
 local originalLighting = {
@@ -92,6 +108,7 @@ local hue = 0
 local rainbowSpeed = 0.005
 local lightingHue = 0
 
+-- FOV круг
 local fovCircle
 pcall(function()
     fovCircle = Drawing.new("Circle")
@@ -103,7 +120,7 @@ pcall(function()
     fovCircle.Visible = false
 end)
 
---> [< ПИНГ И РЕГИОН СЕРВЕРА >] <--
+--> [< ПИНГ И РЕГИОН >] <--
 
 local function getPlayerPing()
     local success, ping = pcall(function()
@@ -115,21 +132,109 @@ local function getPlayerPing()
     return 0
 end
 
--- Получение региона СЕРВЕРА через первого игрока (хост сервера)
+-- Регион СЕРВЕРА через первого игрока (хост сервера)
 local function getServerRegion()
     local success, region = pcall(function()
-        -- Первый игрок в списке обычно создатель сервера
-        -- Roblox создает сервер рядом с ним => его регион ≈ регион сервера
         local firstPlayer = Players:GetPlayers()[1]
-        if not firstPlayer then
-            firstPlayer = LocalPlayer
-        end
+        if not firstPlayer then firstPlayer = LocalPlayer end
         return LocalizationService:GetCountryRegionForPlayerAsync(firstPlayer)
     end)
     if success and region then
         return tostring(region)
     end
     return "Unknown"
+end
+
+--> [< SILENT AIM >] <--
+
+local silentAimConnection = nil
+local originalNamecall = nil
+local metaTable = nil
+
+local function getSilentAimTarget()
+    local mousePos = UserInputService:GetMouseLocation()
+    local bestPart, bestDist = nil, nil
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        if silentAimSettings.TeamCheck and plr.Team == LocalPlayer.Team then continue end
+        
+        local char = plr.Character
+        if not char then continue end
+        
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then continue end
+        
+        local part = char:FindFirstChild(silentAimSettings.TargetPart)
+        if not part then continue end
+        
+        if silentAimSettings.VisibleCheck then
+            local parts = Camera:GetPartsObscuringTarget({part.Position}, {LocalPlayer.Character, char})
+            if #parts > 0 then continue end
+        end
+        
+        local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+        if not onScreen then continue end
+        
+        local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
+        
+        if dist <= silentAimSettings.FOVRadius and (not bestDist or dist < bestDist) then
+            bestPart = part
+            bestDist = dist
+        end
+    end
+
+    return bestPart
+end
+
+local function enableSilentAim()
+    if silentAimConnection then return end
+    
+    local success = pcall(function()
+        metaTable = getrawmetatable(game)
+        originalNamecall = metaTable.__namecall
+        setreadonly(metaTable, false)
+        
+        metaTable.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            
+            if silentAimSettings.Enabled and method == "Raycast" and self == Workspace then
+                if math.random(0, 100) <= silentAimSettings.HitChance then
+                    local targetPart = getSilentAimTarget()
+                    if targetPart then
+                        local args = {...}
+                        local origin = args[1]
+                        local dir = (targetPart.Position - origin).Unit * args[2].Magnitude
+                        args[2] = dir
+                        return originalNamecall(self, unpack(args))
+                    end
+                end
+            end
+            
+            return originalNamecall(self, ...)
+        end)
+        
+        setreadonly(metaTable, true)
+        silentAimConnection = true
+        print("✅ Silent Aim хук установлен")
+    end)
+    
+    if not success then
+        warn("❌ Silent Aim не поддерживается инжектором (getrawmetatable)")
+        silentAimSettings.Enabled = false
+    end
+end
+
+local function disableSilentAim()
+    if metaTable and originalNamecall then
+        pcall(function()
+            setreadonly(metaTable, false)
+            metaTable.__namecall = originalNamecall
+            setreadonly(metaTable, true)
+        end)
+    end
+    silentAimConnection = nil
+    print("✅ Silent Aim хук снят")
 end
 
 --> [< ВИЗУАЛЬНЫЕ ФУНКЦИИ >] <--
@@ -403,7 +508,7 @@ local function serverHop()
     pcall(function()
         local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
         local response = game:HttpGet(url)
-        local servers = game:GetService("HttpService"):JSONDecode(response)
+        local servers = HttpService:JSONDecode(response)
         local available = {}
         
         for _, s in ipairs(servers.data) do
@@ -448,6 +553,28 @@ local function rejoinGame()
     end)
 end
 
+-- Создать новый приватный сервер и зайти на него
+local function createAndJoinNewServer()
+    Fluent:Notify({
+        Title = "🔄 Создание сервера",
+        Content = "Генерация нового сервера...",
+        Duration = 3
+    })
+
+    local success, err = pcall(function()
+        local accessCode = TeleportService:ReserveServer(game.PlaceId)
+        TeleportService:TeleportToPrivateServer(game.PlaceId, accessCode, {LocalPlayer})
+    end)
+
+    if not success then
+        Fluent:Notify({
+            Title = "❌ Ошибка",
+            Content = "Не удалось создать сервер: " .. tostring(err),
+            Duration = 5
+        })
+    end
+end
+
 --> [< GUI >] <--
 
 local Window = Fluent:CreateWindow({
@@ -462,6 +589,7 @@ local Window = Fluent:CreateWindow({
 
 local Tabs = {
     Aimbot = Window:AddTab({ Title = "Aimbot 🎯", Icon = "crosshair" }),
+    SilentAim = Window:AddTab({ Title = "Silent Aim 🎭", Icon = "eye-off" }),
     Visual = Window:AddTab({ Title = "Visual 👁️", Icon = "eye" }),
     Server = Window:AddTab({ Title = "Server 🌐", Icon = "globe" }),
     ["UI Settings"] = Window:AddTab({ Title = "UI Settings", Icon = "palette" })
@@ -544,6 +672,65 @@ Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnCh
 Tabs.Aimbot:AddToggle("HealthCheck", {Title = "Health Check", Default = false}):OnChanged(function(Value) settings.healthCheck = Value end)
 Tabs.Aimbot:AddSlider("MinHealth", {Title = "Min Health", Default = 0, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(Value) settings.minHealth = Value end)
 
+--> [< ВКЛАДКА SILENT AIM >] <--
+
+Tabs.SilentAim:AddParagraph({
+    Title = "🎭 Silent Aim",
+    Content = "Тихая подмена направления выстрела через хук Raycast. Работает только если инжектор поддерживает getrawmetatable."
+})
+
+Tabs.SilentAim:AddToggle("SilentAimEnabled", {
+    Title = "Enable Silent Aim",
+    Description = "Включить Silent Aim",
+    Default = false
+}):OnChanged(function(Value)
+    silentAimSettings.Enabled = Value
+    if Value then
+        enableSilentAim()
+    else
+        disableSilentAim()
+    end
+end)
+
+Tabs.SilentAim:AddToggle("SilentAimTeamCheck", {
+    Title = "Team Check",
+    Description = "Не целиться в союзников",
+    Default = false
+}):OnChanged(function(Value) silentAimSettings.TeamCheck = Value end)
+
+Tabs.SilentAim:AddToggle("SilentAimVisibleCheck", {
+    Title = "Visible Check",
+    Description = "Только видимые цели",
+    Default = false
+}):OnChanged(function(Value) silentAimSettings.VisibleCheck = Value end)
+
+Tabs.SilentAim:AddDropdown("SilentAimTargetPart", {
+    Title = "Target Part",
+    Values = {"Head", "HumanoidRootPart", "UpperTorso", "Torso"},
+    Default = 2,
+    Multi = false
+}):OnChanged(function(Value)
+    silentAimSettings.TargetPart = Value
+end)
+
+Tabs.SilentAim:AddSlider("SilentAimFOV", {
+    Title = "FOV Radius",
+    Description = "Радиус поиска цели (пиксели)",
+    Default = 130,
+    Min = 0,
+    Max = 500,
+    Rounding = 0
+}):OnChanged(function(Value) silentAimSettings.FOVRadius = Value end)
+
+Tabs.SilentAim:AddSlider("SilentAimHitChance", {
+    Title = "Hit Chance",
+    Description = "Шанс срабатывания (%)",
+    Default = 100,
+    Min = 0,
+    Max = 100,
+    Rounding = 0
+}):OnChanged(function(Value) silentAimSettings.HitChance = Value end)
+
 --> [< ВКЛАДКА VISUAL >] <--
 
 local VisualSection = Tabs.Visual:AddSection("World Visuals")
@@ -610,21 +797,24 @@ ServerSection:AddButton({
     Callback = function() rejoinGame() end
 })
 
+ServerSection:AddButton({
+    Title = "🏠 Создать новый сервер",
+    Description = "Создать приватный сервер и зайти на него",
+    Callback = function() createAndJoinNewServer() end
+})
+
 local InfoSection = Tabs.Server:AddSection("Server Info")
 
--- Пинг
 local pingParagraph = InfoSection:AddParagraph({
     Title = "📶 Пинг",
     Content = "Загрузка..."
 })
 
--- Регион сервера
 local regionParagraph = InfoSection:AddParagraph({
     Title = "🌍 Регион сервера",
     Content = "Определение..."
 })
 
--- Поток обновления пинга
 task.spawn(function()
     task.wait(1)
     while task.wait(0.5) do
@@ -632,14 +822,12 @@ task.spawn(function()
         local color = "🟢"
         if ping > 100 then color = "🟡" end
         if ping > 200 then color = "🔴" end
-        
         pcall(function()
             pingParagraph:SetDesc(string.format("%s %d ms", color, ping))
         end)
     end
 end)
 
--- Поток обновления региона
 task.spawn(function()
     task.wait(2)
     while task.wait(10) do
@@ -790,6 +978,64 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
+--> [< СВОБОДНЫЙ КУРСОР ПРИ ОТКРЫТОМ МЕНЮ >] <--
+
+local originalMouseBehavior = UserInputService.MouseBehavior
+local originalMouseIcon = UserInputService.MouseIconEnabled
+local menuOpen = true
+
+local function setMenuState(state)
+    menuOpen = state
+    if state then
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        UserInputService.MouseIconEnabled = true
+    else
+        UserInputService.MouseBehavior = originalMouseBehavior
+        UserInputService.MouseIconEnabled = originalMouseIcon
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.RightControl then
+        setMenuState(not menuOpen)
+    end
+end)
+
+task.spawn(function()
+    task.wait(1.5)
+    local fluentGui = CoreGui:FindFirstChild("Fluent")
+    if not fluentGui then
+        for _, gui in ipairs(CoreGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and (gui.Name:lower():find("fluent") or gui.Name:lower():find("universal")) then
+                fluentGui = gui
+                break
+            end
+        end
+    end
+    
+    if fluentGui then
+        fluentGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+            setMenuState(fluentGui.Enabled)
+        end)
+        setMenuState(fluentGui.Enabled)
+        print("✅ Свободный курсор подключён (GUI: " .. fluentGui.Name .. ")")
+    else
+        print("⚠️ Fluent GUI не найден — используется только RightControl")
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if menuOpen then
+        if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        end
+        if not UserInputService.MouseIconEnabled then
+            UserInputService.MouseIconEnabled = true
+        end
+    end
+end)
+
 --> [< UI SETTINGS (SaveManager + InterfaceManager) >] <--
 
 SaveManager:SetLibrary(Fluent)
@@ -804,7 +1050,7 @@ SaveManager:BuildConfigSection(Tabs["UI Settings"])
 
 SaveManager:LoadAutoloadConfig()
 
---> [< ОТКРЫТИЕ SERVER TAB ПРИ ЗАГРУЗКЕ >] <--
+--> [< ОТКРЫТИЕ SERVER TAB >] <--
 
 task.spawn(function()
     task.wait(1)
@@ -814,9 +1060,11 @@ task.spawn(function()
 end)
 
 print("====================================")
-print("✅ Universal Aimbot (Fluent) загружен!")
+print("✅ Universal Aimbot v3.0 загружен!")
 print("📁 Конфиги: workspace/UniversalAimbot/Configs")
-print("📶 Пинг через Player:GetNetworkPing()")
-print("🌍 Регион через первого игрока (хост сервера)")
-print("📌 RightControl - скрыть меню")
+print("📶 Пинг: Player:GetNetworkPing()")
+print("🌍 Регион: через первого игрока")
+print("🎭 Silent Aim: " .. (silentAimConnection and "работает" or "не активен"))
+print("📌 RightControl - скрыть/показать меню")
+print("📌 \\ - активация аимбота")
 print("====================================")
