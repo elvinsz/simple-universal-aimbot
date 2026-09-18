@@ -1,7 +1,7 @@
 --[[
-    Universal Aimbot v3.2 (Fluent UI)
+    Universal Aimbot v3.3 (Fluent UI)
     GitHub: https://github.com/elvinsz/simple-universal-aimbot
-    Функции: Aimbot, Silent Aim, Visual Effects, Server Tools, Пинг, Регион, Free Cursor
+    Функции: Aimbot, Silent Aim, Visual Effects, Server Tools, Пинг, Регион
 ]]
 
 if getgenv().UniversalAimbotLoaded then
@@ -141,7 +141,6 @@ end
 
 --> [< SILENT AIM >] <--
 
-
 local silentAimHookActive = false
 local oldNamecall = nil
 local metaTable = nil
@@ -193,23 +192,19 @@ local function enableSilentAim()
         metaTable.__namecall = function(self, ...)
             local method = getnamecallmethod()
             
-            -- Перехватываем ТОЛЬКО Raycast на Workspace
             if method == "Raycast" and self == Workspace then
                 local args = {...}
                 
-                -- Проверяем типы аргументов
                 if #args >= 2 
                    and typeof(args[1]) == "Vector3" 
                    and typeof(args[2]) == "Vector3" 
                    and silentAimSettings.Enabled then
                     
-                    -- ⭐ ФИЛЬТР: только Raycast от персонажа игрока
                     local origin = args[1]
                     local myChar = LocalPlayer.Character
                     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
                     
                     if myRoot and (origin - myRoot.Position).Magnitude < 15 then
-                        -- Это Raycast от игрока — можно модифицировать
                         local ok, target = pcall(getSilentAimTarget)
                         if ok and target and math.random(1, 100) <= silentAimSettings.HitChance then
                             local newDir = target.Position - origin
@@ -219,7 +214,6 @@ local function enableSilentAim()
                         end
                     end
                     
-                    -- Возвращаем (модифицированный или оригинальный)
                     return oldNamecall(self, unpack(args))
                 end
             end
@@ -249,6 +243,7 @@ local function disableSilentAim()
     silentAimHookActive = false
     print("✅ Silent Aim хук снят")
 end
+
 --> [< ВИЗУАЛЬНЫЕ ФУНКЦИИ >] <--
 
 local function setXRay(enabled)
@@ -989,106 +984,6 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
---> [< СВОБОДНЫЙ КУРСОР ПРИ ОТКРЫТОМ МЕНЮ (ФИНАЛ) >] <--
-
-local originalMouseBehavior = nil
-local originalMouseIcon = nil
-local menuOpen = false
-local initialized = false
-local fluentGuiRef = nil
-
--- Определяем "родное" поведение мыши игры (обычно LockCenter)
-task.spawn(function()
-    task.wait(2)
-    originalMouseBehavior = UserInputService.MouseBehavior
-    originalMouseIcon = UserInputService.MouseIconEnabled
-    
-    if originalMouseBehavior == Enum.MouseBehavior.Default then
-        task.wait(3)
-        if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
-            originalMouseBehavior = UserInputService.MouseBehavior
-            originalMouseIcon = UserInputService.MouseIconEnabled
-        else
-            originalMouseBehavior = Enum.MouseBehavior.LockCenter
-            originalMouseIcon = false
-        end
-    end
-    
-    initialized = true
-    print("🖱️ Оригинальное поведение мыши: " .. tostring(originalMouseBehavior))
-end)
-
--- Находим Fluent GUI и следим за его Enabled
-task.spawn(function()
-    task.wait(1.5)
-    
-    local fluentGui = CoreGui:FindFirstChild("Fluent")
-    if not fluentGui then
-        for _, gui in ipairs(CoreGui:GetChildren()) do
-            if gui:IsA("ScreenGui") and (gui.Name:lower():find("fluent") or gui.Name:lower():find("universal")) then
-                fluentGui = gui
-                break
-            end
-        end
-    end
-    
-    if fluentGui then
-        fluentGuiRef = fluentGui
-        menuOpen = fluentGui.Enabled
-        
-        fluentGui:GetPropertyChangedSignal("Enabled"):Connect(function()
-            menuOpen = fluentGui.Enabled
-        end)
-        
-        print("✅ Fluent GUI: " .. fluentGui.Name .. " | Enabled: " .. tostring(menuOpen))
-    else
-        print("⚠️ Fluent GUI не найден — используется только RightControl")
-    end
-end)
-
--- Fallback: проверка состояния каждые 0.2 сек
-task.spawn(function()
-    while task.wait(0.2) do
-        if fluentGuiRef then
-            menuOpen = fluentGuiRef.Enabled
-        end
-    end
-end)
-
--- RightControl — переключение (Fluent сам меняет Enabled, мы подхватываем)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.RightControl then
-        task.wait(0.1)
-        if fluentGuiRef then
-            menuOpen = fluentGuiRef.Enabled
-        else
-            menuOpen = not menuOpen
-        end
-    end
-end)
-
--- ⭐ ГЛАВНЫЙ ФОРС: максимальный приоритет (1999 = почти последний)
-RunService:BindToRenderStep("MouseControlForce", 1999, function()
-    if menuOpen then
-        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-        UserInputService.MouseIconEnabled = true
-    else
-        if initialized and originalMouseBehavior and originalMouseBehavior ~= Enum.MouseBehavior.Default then
-            UserInputService.MouseBehavior = originalMouseBehavior
-            UserInputService.MouseIconEnabled = originalMouseIcon
-        end
-    end
-end)
-
--- ⭐ ДУБЛИРУЮЩИЙ ФОРС через Heartbeat
-RunService.Heartbeat:Connect(function()
-    if menuOpen then
-        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-        UserInputService.MouseIconEnabled = true
-    end
-end)
-
 --> [< UI SETTINGS (SaveManager + InterfaceManager) >] <--
 
 SaveManager:SetLibrary(Fluent)
@@ -1113,12 +1008,12 @@ task.spawn(function()
 end)
 
 print("====================================")
-print("✅ Universal Aimbot v3.2 загружен!")
+print("✅ Universal Aimbot v3.3 загружен!")
 print("📁 Конфиги: workspace/UniversalAimbot/Configs")
 print("📶 Пинг: Player:GetNetworkPing()")
 print("🌍 Регион: через первого игрока")
-print("🎭 Silent Aim: " .. (silentAimConnection and "работает" or "не активен"))
-print("🖱️  Курсор: BindToRenderStep (1999) + Heartbeat")
+print("🎭 Silent Aim: " .. (silentAimHookActive and "работает" or "не активен"))
+print("🖱️  Курсор: управление передано игре и Fluent UI")
 print("📌 RightControl - скрыть/показать меню")
 print("📌 \\ - активация аимбота")
 print("====================================")
