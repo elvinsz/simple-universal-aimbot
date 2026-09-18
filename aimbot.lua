@@ -1,7 +1,7 @@
 --[[
     Universal Aimbot v2.0
-    GitHub: https://github.com/ВАШ_ЮЗЕРНЕЙМ/universal-aimbot
-    Описание: Универсальный аимбот с ESP, визуальными эффектами, системой конфигов и server hop
+    GitHub: https://github.com/elvinsz/simple-universal-aimbot
+    Описание: Универсальный аимбот с визуальными эффектами, системой конфигов и server hop
 ]]
 
 -- Проверка на повторную загрузку
@@ -11,22 +11,17 @@ if getgenv().UniversalAimbotLoaded then
 end
 getgenv().UniversalAimbotLoaded = true
 
--- Загрузка Rayfield
-local Rayfield
-local success, err = pcall(function()
-    Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-end)
+-- Загрузка Rayfield (БЕЗ pcall - для совместимости с XENO)
+print("🔄 Загрузка Rayfield...")
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
-if not success or not Rayfield then
-    success, err = pcall(function()
-        Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/shlexware/Rayfield/main/source.lua'))()
-    end)
-end
-
-if not success or not Rayfield then
+if not Rayfield then
+    warn("❌ Rayfield не загружен! Проверьте интернет или смените инжектор.")
     getgenv().UniversalAimbotLoaded = false
-    error("❌ Не удалось загрузить Rayfield!")
+    return
 end
+
+print("✅ Rayfield загружен!")
 
 -- Сервисы
 local RunService = game:GetService("RunService")
@@ -1073,4 +1068,4 @@ print("✅ Universal Aimbot загружен!")
 print("📁 Конфиги: workspace/" .. CONFIGS_FOLDER)
 print("📌 RightControl - скрыть меню")
 print("📌 \\ - активация аимбота")
-print("====================================")A
+print("====================================")
