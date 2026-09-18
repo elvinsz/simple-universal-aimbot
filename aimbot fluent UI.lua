@@ -1,6 +1,7 @@
 --[[
-    Universal Shindo Cheat v6.1
-    Исправлено: Silent Aim Hold с назначаемой клавишей, Colors, CHI/STAM
+    Universal Shindo Cheat v7.0
+    Добавлено: 360° режим, Max Distance, Prioritize Close, FOV toggle
+    Исправлено: CHI/STAM (рекурсивный поиск)
 ]]
 
 if getgenv().UniversalShindoLoaded then return end
@@ -31,18 +32,30 @@ pcall(function() shindoEvent = LocalPlayer:WaitForChild("startevent", 8) end)
 --> [< НАСТРОЙКИ >] <--
 
 local settings = {
-    fov = 300, smoothing = 0.15, prediction = 0.065,
-    wallCheck = false, stickyAim = false, teamCheck = false,
-    minHealth = 0, aimPart = "Auto", aimMode = "Hold", key = "BackSlash",
-    showFovCircle = true, maxDistance = 5000, prioritizeClose = true,
-    fovColor = Color3.fromRGB(255, 0, 0), targetedColor = Color3.fromRGB(0, 255, 0),
+    -- Aimbot
+    fov = 300,
+    smoothing = 0.15,
+    prediction = 0.065,
+    wallCheck = false,
+    stickyAim = false,
+    teamCheck = false,
+    aimPart = "Auto",
+    aimMode = "Hold",
+    key = "BackSlash",
+    showFovCircle = true,
+    maxDistance = 5000,
+    prioritizeClose = true,
+    mode360 = false,       -- ✅ НОВОЕ
+    fovColor = Color3.fromRGB(255, 0, 0),
+    targetedColor = Color3.fromRGB(0, 255, 0),
     rainbowFov = false,
+    
+    -- Visual
     xray = false, fullBright = false, nightVision = false,
     noShadows = false, noBloom = false, noSunRays = false,
     rainbowLighting = false, noFog = false
 }
 
--- Silent Aim
 local silentAim = {
     Enabled = false,
     MasterEnabled = false,
@@ -52,12 +65,16 @@ local silentAim = {
     Prediction = 0.187,
     FOV = 500,
     TargetPart = "HumanoidRootPart",
+    ShowFovCircle = true,     -- ✅ НОВОЕ
+    MaxDistance = 5000,       -- ✅ НОВОЕ
+    PrioritizeClose = true,   -- ✅ НОВОЕ
+    Mode360 = false,          -- ✅ НОВОЕ
+    FovColor = Color3.fromRGB(100, 200, 255),
     CachedTarget = nil,
     CachedCFrame = nil,
     Logging = false
 }
 
--- ESP
 local esp = {
     Enabled = false,
     ShowName = true, ShowHealth = true, ShowDistance = true,
@@ -71,12 +88,10 @@ local esp = {
     Objects = {}, LastUpdate = 0
 }
 
--- Colors
 local colors = {
     RainbowSkin = false, RainbowHair = false,
     SkinSpeed = 0.5, HairSpeed = 0.5,
-    Invert = true,
-    Clamp = true
+    Invert = true, Clamp = true
 }
 local skinTimer, hairTimer = 0, 0
 
@@ -99,6 +114,7 @@ local ALL_BODY_PARTS = {
     "LeftHand", "RightHand", "LeftFoot", "RightFoot"
 }
 
+-- FOV круги
 local fovCircle
 pcall(function()
     fovCircle = Drawing.new("Circle")
@@ -108,6 +124,17 @@ pcall(function()
     fovCircle.Color = settings.fovColor
     fovCircle.Transparency = 1
     fovCircle.Visible = false
+end)
+
+local silentFovCircle
+pcall(function()
+    silentFovCircle = Drawing.new("Circle")
+    silentFovCircle.Thickness = 2
+    silentFovCircle.Radius = silentAim.FOV
+    silentFovCircle.Filled = false
+    silentFovCircle.Color = silentAim.FovColor
+    silentFovCircle.Transparency = 1
+    silentFovCircle.Visible = false
 end)
 
 --> [< ПИНГ И РЕГИОН >] <--
@@ -124,70 +151,76 @@ local function getServerRegion()
     return ok and region and tostring(region) or "Unknown"
 end
 
---> [< CHI/STAM >] <--
+--> [< CHI/STAM — РЕКУРСИВНЫЙ ПОИСК >] <--
+
+-- ✅ УЛУЧШЕНО: рекурсивный поиск с проверкой имён
+local function findValueByNames(root, names)
+    if not root then return 0 end
+    local found = 0
+    pcall(function()
+        for _, obj in ipairs(root:GetDescendants()) do
+            if obj:IsA("NumberValue") or obj:IsA("IntValue") then
+                local lower = string.lower(obj.Name)
+                for _, name in ipairs(names) do
+                    if lower == string.lower(name) then
+                        local v = tonumber(obj.Value) or 0
+                        if v > 0 then  -- Берём только ненулевые
+                            found = math.floor(v)
+                            return
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    return found
+end
 
 local function getPlayerChiStam(player)
     local chi, stam = 0, 0
     
-    local statz = player:FindFirstChild("statz")
-    if statz then
-        local chiObj = statz:FindFirstChild("chakra") 
-            or statz:FindFirstChild("chi")
-            or statz:FindFirstChild("curchakra")
-        
-        if chiObj and (chiObj:IsA("NumberValue") or chiObj:IsA("IntValue")) then
-            chi = math.floor(chiObj.Value)
-        end
-        
-        local stamObj = statz:FindFirstChild("stamina")
-            or statz:FindFirstChild("stam")
-            or statz:FindFirstChild("curstamina")
-        
-        if stamObj and (stamObj:IsA("NumberValue") or stamObj:IsA("IntValue")) then
-            stam = math.floor(stamObj.Value)
-        end
-    end
+    -- Ищем в player целиком (рекурсивно)
+    chi = findValueByNames(player, {"chakra", "chi", "curchakra", "curchi", "currentchakra", "currentchi"})
+    stam = findValueByNames(player, {"stamina", "stam", "curstamina", "curstam", "currentstamina", "currentstam"})
     
-    if chi == 0 and stam == 0 then
-        local char = player.Character
-        if char then
-            local chiObj = char:FindFirstChild("chakra") or char:FindFirstChild("chi")
-            if chiObj and (chiObj:IsA("NumberValue") or chiObj:IsA("IntValue")) then
-                chi = math.floor(chiObj.Value)
-            end
-            local stamObj = char:FindFirstChild("stamina") or char:FindFirstChild("stam")
-            if stamObj and (stamObj:IsA("NumberValue") or stamObj:IsA("IntValue")) then
-                stam = math.floor(stamObj.Value)
-            end
-        end
+    -- Если не нашли в player — ищем в character
+    if chi == 0 and player.Character then
+        chi = findValueByNames(player.Character, {"chakra", "chi", "curchakra", "curchi"})
+    end
+    if stam == 0 and player.Character then
+        stam = findValueByNames(player.Character, {"stamina", "stam", "curstamina", "curstam"})
     end
     
     return chi, stam
 end
 
+-- Debug: полный скан
 local function debugScanPlayer()
     print("===== SCAN LOCAL PLAYER =====")
-    local statz = LocalPlayer:FindFirstChild("statz")
-    if statz then
-        print("--- statz ---")
-        for _, obj in ipairs(statz:GetDescendants()) do
-            if obj:IsA("NumberValue") or obj:IsA("IntValue") then
-                print(string.format("  [%s] = %s", obj:GetFullName(), tostring(obj.Value)))
+    print("Player name: " .. LocalPlayer.Name)
+    
+    -- Скан всех NumberValue/IntValue в player
+    local count = 0
+    for _, obj in ipairs(LocalPlayer:GetDescendants()) do
+        if obj:IsA("NumberValue") or obj:IsA("IntValue") then
+            local val = tostring(obj.Value)
+            local name = string.lower(obj.Name)
+            -- Показываем только похожие на chi/stam или с маленькими именами
+            if name:find("chi") or name:find("chakra") or name:find("stam") or #obj.Name < 15 then
+                print(string.format("  [%s] = %s", obj:GetFullName(), val))
+                count = count + 1
             end
         end
-    else
-        print("❌ statz не найден!")
     end
+    print("Total similar values: " .. count)
     
-    local char = LocalPlayer.Character
-    if char then
-        print("--- character ---")
-        for _, obj in ipairs(char:GetDescendants()) do
+    -- Отдельно statz
+    local statz = LocalPlayer:FindFirstChild("statz")
+    if statz then
+        print("--- statz content ---")
+        for _, obj in ipairs(statz:GetChildren()) do
             if obj:IsA("NumberValue") or obj:IsA("IntValue") then
-                local val = tostring(obj.Value)
-                if #val < 15 then
-                    print(string.format("  [%s] = %s", obj:GetFullName(), val))
-                end
+                print(string.format("  %s = %s", obj.Name, tostring(obj.Value)))
             end
         end
     end
@@ -294,8 +327,7 @@ local metaT = nil
 
 RunService.Heartbeat:Connect(function()
     if silentAim.MasterEnabled and silentAim.Mode == "Hold" then
-        local pressed = UserInputService:IsKeyDown(silentAim.HoldKey)
-        silentAim.Enabled = pressed
+        silentAim.Enabled = UserInputService:IsKeyDown(silentAim.HoldKey)
     end
     
     if not silentAim.Enabled then
@@ -305,10 +337,11 @@ RunService.Heartbeat:Connect(function()
     end
     
     local best = nil
-    local dist = silentAim.FOV
+    local bestScore = math.huge
     local cam = Workspace.CurrentCamera
     local MousePos = cam.ViewportSize / 2
-
+    local camPos = cam.CFrame.Position
+    
     for _, p in pairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         local char = p.Character
@@ -317,22 +350,45 @@ RunService.Heartbeat:Connect(function()
         local hum = char:FindFirstChildOfClass("Humanoid")
         if not part or not hum or hum.Health <= 0 then continue end
         if not part.Parent then continue end
-
+        
+        -- Max Distance check
+        if silentAim.MaxDistance > 0 then
+            local rootPart = char:FindFirstChild("HumanoidRootPart")
+            if rootPart and (rootPart.Position - camPos).Magnitude > silentAim.MaxDistance then
+                continue
+            end
+        end
+        
         local pos, vis = cam:WorldToViewportPoint(part.Position)
         if not vis then continue end
-
-        local d = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
-        if d < dist then
+        
+        local screenDist = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
+        
+        -- 360 mode: пропускаем проверку FOV
+        if not silentAim.Mode360 then
+            if screenDist > silentAim.FOV then continue end
+        end
+        
+        -- Считаем score
+        local worldDist = (part.Position - camPos).Magnitude
+        local score
+        if silentAim.PrioritizeClose then
+            score = worldDist
+        else
+            score = screenDist
+        end
+        
+        if score < bestScore then
+            bestScore = score
             best = part
-            dist = d
         end
     end
 
     silentAim.CachedTarget = best
     if silentAim.CachedTarget and silentAim.CachedTarget.Parent then
         local targetPos = silentAim.CachedTarget.Position + (silentAim.CachedTarget.Velocity * silentAim.Prediction)
-        local camPos = cam.CFrame.Position
-        silentAim.CachedCFrame = CFrame.new(targetPos, targetPos + (targetPos - camPos).Unit)
+        local camPos2 = cam.CFrame.Position
+        silentAim.CachedCFrame = CFrame.new(targetPos, targetPos + (targetPos - camPos2).Unit)
     end
 end)
 
@@ -347,8 +403,7 @@ local function enableSilentHook()
             local args = {...}
             
             if silentAim.Logging and method == "FireServer" and self.Name == "update" then
-                print("[SILENT-LOG] update: args[1]=" .. tostring(args[1]) .. 
-                      " args[2]=" .. (typeof(args[2]) == "CFrame" and "CFrame" or tostring(args[2])))
+                print("[SILENT-LOG] update: args[1]=" .. tostring(args[1]))
             end
             
             if method == "FireServer" and self.Name == "update" then
@@ -483,21 +538,14 @@ local function prepareColor(r, g, b)
     r = math.clamp(math.floor(r), 1, 254)
     g = math.clamp(math.floor(g), 1, 254)
     b = math.clamp(math.floor(b), 1, 254)
-    
     if colors.Invert then
-        r = 255 - r
-        g = 255 - g
-        b = 255 - b
+        r = 255 - r; g = 255 - g; b = 255 - b
     end
-    
     return string.format("%d,%d,%d", r, g, b)
 end
 
 local function setSkinColor(r, g, b)
-    if not shindoEvent then
-        Fluent:Notify({Title = "❌", Content = "startevent не найден", Duration = 3})
-        return
-    end
+    if not shindoEvent then return end
     task.spawn(function()
         local char = LocalPlayer.Character
         if char then
@@ -505,14 +553,10 @@ local function setSkinColor(r, g, b)
             char:WaitForChild("Head", 5)
         end
         task.wait(0.3)
-        
         local str = prepareColor(r, g, b)
-        print("[COLOR] Skin: " .. str .. " (in=" .. tostring(colors.Invert) .. ")")
-        
+        print("[COLOR] Skin: " .. str)
         for i = 1, 3 do
-            local ok = pcall(function()
-                shindoEvent:FireServer("skin", str)
-            end)
+            local ok = pcall(function() shindoEvent:FireServer("skin", str) end)
             if ok then break end
             task.wait(0.2)
         end
@@ -528,14 +572,10 @@ local function setHairColor(r, g, b)
             char:WaitForChild("Head", 5)
         end
         task.wait(0.3)
-        
         local str = prepareColor(r, g, b)
         print("[COLOR] Hair: " .. str)
-        
         for i = 1, 3 do
-            local ok = pcall(function()
-                shindoEvent:FireServer("haircolor", str)
-            end)
+            local ok = pcall(function() shindoEvent:FireServer("haircolor", str) end)
             if ok then break end
             task.wait(0.2)
         end
@@ -543,15 +583,6 @@ local function setHairColor(r, g, b)
 end
 
 --> [< АИМБОТ >] <--
-
-local function closeScript()
-    pcall(function()
-        if fovCircle then fovCircle.Visible = false; fovCircle:Remove() end
-        if Window then Window:Destroy() end
-        disableSilentHook()
-    end)
-    getgenv().UniversalShindoLoaded = false
-end
 
 local function getBestAimPart(char)
     if not char then return nil end
@@ -594,24 +625,41 @@ local function getTarget()
     local bestT, bestS = nil, math.huge
     local camPos = Camera.CFrame.Position
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer or isSameTeam(p) then continue end
         local char = p.Character
         if not char then continue end
         local hum = char:FindFirstChild("Humanoid")
         if not hum or hum.Health <= 0 then continue end
+        
         local tp = getBestAimPart(char)
         if not tp or not isVisible(char) then continue end
+        
+        -- Max Distance
         if settings.maxDistance > 0 then
             local rp = char:FindFirstChild("HumanoidRootPart")
             if rp and (rp.Position - camPos).Magnitude > settings.maxDistance then continue end
         end
+        
         local sp, onScreen = Camera:WorldToViewportPoint(tp.Position)
         if not onScreen then continue end
+        
         local cd = (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude
-        if cd > settings.fov then continue end
+        
+        -- 360 mode: пропускаем проверку FOV
+        if not settings.mode360 then
+            if cd > settings.fov then continue end
+        end
+        
         local dist = (tp.Position - camPos).Magnitude
-        local score = settings.prioritizeClose and (dist * 0.7 + cd * 0.3) or (cd * 0.7 + dist * 0.3)
+        local score
+        if settings.prioritizeClose then
+            score = dist
+        else
+            score = cd
+        end
+        
         if score < bestS then bestS = score; bestT = p end
     end
     return bestT
@@ -655,8 +703,8 @@ end
 --> [< GUI >] <--
 
 local Window = Fluent:CreateWindow({
-    Title = "Universal Shindo v6.1",
-    SubTitle = "Silent Aim Bind • Colors • CHI/STAM",
+    Title = "Universal Shindo v7.0",
+    SubTitle = "360° Aimbot • Silent Aim • ESP • Colors",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 500),
     Acrylic = true,
@@ -684,15 +732,60 @@ Tabs.Aimbot:AddToggle("AimOn", {Title = "Enable Aimbot", Default = false}):OnCha
     if not v then aiming = false; currentTarget = nil end
 end)
 
-Tabs.Aimbot:AddButton({Title = "👁️ Hide Menu", Callback = function() Window:Toggle() end})
-Tabs.Aimbot:AddButton({Title = "🔴 Close Script", Callback = function() closeScript() end})
+-- ✅ ВЕРНУЛ: переключатель FOV
+Tabs.Aimbot:AddToggle("ShowFOV", {Title = "Show FOV Circle", Default = true}):OnChanged(function(v)
+    settings.showFovCircle = v
+    if fovCircle then fovCircle.Visible = v and aimbotEnabled end
+end)
+
+Tabs.Aimbot:AddColorpicker("FovColor", {Title = "FOV Color", Default = Color3.fromRGB(255, 0, 0)}):OnChanged(function(c)
+    settings.fovColor = c
+    if fovCircle and not settings.rainbowFov then fovCircle.Color = c end
+end)
+
+Tabs.Aimbot:AddToggle("RainbowFov", {Title = "Rainbow FOV", Default = false}):OnChanged(function(v)
+    settings.rainbowFov = v
+end)
 
 Tabs.Aimbot:AddDropdown("AimPart", {Title = "Aim Part",
     Values = {"Auto", "Head", "HumanoidRootPart", "UpperTorso", "Torso"},
     Default = 1}):OnChanged(function(v) settings.aimPart = v end)
 
+Tabs.Aimbot:AddDropdown("AimMode", {Title = "Aim Mode",
+    Values = {"Hold (зажать)", "Toggle (переключить)"},
+    Default = 1}):OnChanged(function(v)
+    settings.aimMode = (v == "Hold (зажать)") and "Hold" or "Toggle"
+end)
+
+Tabs.Aimbot:AddButton({
+    Title = "🎹 BIND: BackSlash",
+    Description = "Нажмите для назначения клавиши аимбота",
+    Callback = function()
+        settings.ListeningForAimBind = true
+        Fluent:Notify({Title = "🎹", Content = "Нажмите клавишу для аимбота", Duration = 3})
+    end
+})
+
 Tabs.Aimbot:AddSlider("FOV", {Title = "FOV Size", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(v)
     settings.fov = v; if fovCircle then fovCircle.Radius = v end
+end)
+
+Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance", Description = "0 = без ограничений", Default = 5000, Min = 0, Max = 5000, Rounding = 10}):OnChanged(function(v)
+    settings.maxDistance = v
+end)
+
+Tabs.Aimbot:AddToggle("PriorClose", {Title = "Prioritize Close Targets", Default = true}):OnChanged(function(v)
+    settings.prioritizeClose = v
+end)
+
+-- ✅ 360° режим
+Tabs.Aimbot:AddToggle("Mode360", {Title = "360° Mode", Description = "Игнорирует FOV, целится в любого ближайшего", Default = false}):OnChanged(function(v)
+    settings.mode360 = v
+    Fluent:Notify({
+        Title = v and "🎯 360° ВКЛ" or "🎯 FOV режим",
+        Content = v and "Игнорирует FOV круг" or "Работает по FOV",
+        Duration = 2
+    })
 end)
 
 Tabs.Aimbot:AddSlider("Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v)
@@ -704,12 +797,13 @@ Tabs.Aimbot:AddSlider("Pred", {Title = "Prediction", Default = 6, Min = 0, Max =
 end)
 
 Tabs.Aimbot:AddToggle("WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.wallCheck = v end)
+Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.teamCheck = v end)
 
 --> [< SILENT AIM TAB >] <--
 
 Tabs.Silent:AddParagraph({
     Title = "🎭 Silent Aim",
-    Content = "Назначьте клавишу и удерживайте её для активации (Hold) или переключения (Toggle)."
+    Content = "Назначьте клавишу, удерживайте для активации (Hold) или переключайте (Toggle)."
 })
 
 Tabs.Silent:AddToggle("SilentMaster", {
@@ -719,11 +813,6 @@ Tabs.Silent:AddToggle("SilentMaster", {
 }):OnChanged(function(v)
     silentAim.MasterEnabled = v
     if v then enableSilentHook() else disableSilentHook() end
-    Fluent:Notify({
-        Title = v and "🎭 Silent Aim ВКЛ" or "🎭 Silent Aim ВЫКЛ",
-        Content = v and ("Режим: " .. silentAim.Mode) or "Хук снят",
-        Duration = 2
-    })
 end)
 
 Tabs.Silent:AddDropdown("SilentMode", {
@@ -732,24 +821,15 @@ Tabs.Silent:AddDropdown("SilentMode", {
     Default = 1
 }):OnChanged(function(v)
     silentAim.Mode = v
-    Fluent:Notify({Title = "🎭 Режим: " .. v, Content = "Silent Aim режим изменён", Duration = 2})
 end)
 
--- ✅ КНОПКА НАЗНАЧЕНИЯ КЛАВИШИ
 local silentBindButton
 silentBindButton = Tabs.Silent:AddButton({
     Title = "🎹 BIND: E",
     Description = "Нажмите, потом нажмите любую клавишу",
     Callback = function()
         silentAim.ListeningForBind = true
-        pcall(function()
-            silentBindButton:SetTitle("🎹 Нажмите клавишу...")
-        end)
-        Fluent:Notify({
-            Title = "🎹 Назначение клавиши",
-            Content = "Нажмите любую клавишу...",
-            Duration = 3
-        })
+        pcall(function() silentBindButton:SetTitle("🎹 Нажмите клавишу...") end)
     end
 })
 
@@ -757,12 +837,40 @@ Tabs.Silent:AddDropdown("SilentPart", {Title = "Target Part",
     Values = {"HumanoidRootPart", "Head", "UpperTorso", "Torso"},
     Default = 1}):OnChanged(function(v) silentAim.TargetPart = v end)
 
-Tabs.Silent:AddSlider("SilentPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v)
-    silentAim.Prediction = v / 100
-end)
-
 Tabs.Silent:AddSlider("SilentFOV", {Title = "FOV Radius", Default = 500, Min = 50, Max = 2000, Rounding = 0}):OnChanged(function(v)
     silentAim.FOV = v
+    if silentFovCircle then silentFovCircle.Radius = v end
+end)
+
+-- ✅ НОВЫЕ НАСТРОЙКИ SILENT AIM
+Tabs.Silent:AddToggle("SilentShowFOV", {Title = "Show Silent FOV Circle", Default = true}):OnChanged(function(v)
+    silentAim.ShowFovCircle = v
+end)
+
+Tabs.Silent:AddColorpicker("SilentFovColor", {Title = "Silent FOV Color", Default = Color3.fromRGB(100, 200, 255)}):OnChanged(function(c)
+    silentAim.FovColor = c
+    if silentFovCircle then silentFovCircle.Color = c end
+end)
+
+Tabs.Silent:AddSlider("SilentMaxDist", {Title = "Max Distance", Description = "0 = без ограничений", Default = 5000, Min = 0, Max = 5000, Rounding = 10}):OnChanged(function(v)
+    silentAim.MaxDistance = v
+end)
+
+Tabs.Silent:AddToggle("SilentPriorClose", {Title = "Prioritize Close Targets", Default = true}):OnChanged(function(v)
+    silentAim.PrioritizeClose = v
+end)
+
+Tabs.Silent:AddToggle("SilentMode360", {Title = "360° Mode", Description = "Игнорирует FOV", Default = false}):OnChanged(function(v)
+    silentAim.Mode360 = v
+    Fluent:Notify({
+        Title = v and "🎭 360° ВКЛ" or "🎭 FOV режим",
+        Content = v and "Без FOV" or "По FOV",
+        Duration = 2
+    })
+end)
+
+Tabs.Silent:AddSlider("SilentPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v)
+    silentAim.Prediction = v / 100
 end)
 
 Tabs.Silent:AddToggle("SilentLog", {Title = "Log FireServer (debug)", Default = false}):OnChanged(function(v)
@@ -811,22 +919,12 @@ Tabs.ESP:AddButton({
 
 Tabs.Colors:AddParagraph({
     Title = "🎨 Colors",
-    Content = "Формат: clamp(1-254) + опциональная инверсия (как в вирусе)."
+    Content = "Формат: clamp(1-254) + инверсия."
 })
 
-Tabs.Colors:AddToggle("InvertColors", {
-    Title = "Инвертировать цвет",
-    Description = "Как в оригинальном вирусе",
-    Default = true
-}):OnChanged(function(v)
+Tabs.Colors:AddToggle("InvertColors", {Title = "Инвертировать цвет", Default = true}):OnChanged(function(v)
     colors.Invert = v
-    Fluent:Notify({Title = "🎨", Content = "Инверсия: " .. (v and "ВКЛ" or "ВЫКЛ"), Duration = 2})
 end)
-
-Tabs.Colors:AddToggle("ClampColors", {
-    Title = "Ограничить 1-254",
-    Default = true
-}):OnChanged(function(v) colors.Clamp = v end)
 
 Tabs.Colors:AddToggle("RainbowSkin", {Title = "Rainbow Skin", Default = false}):OnChanged(function(v) colors.RainbowSkin = v end)
 Tabs.Colors:AddToggle("RainbowHair", {Title = "Rainbow Hair", Default = false}):OnChanged(function(v) colors.RainbowHair = v end)
@@ -863,7 +961,6 @@ Tabs.Colors:AddButton({
         local c = Options.CustomSkin.Value
         if c then
             setSkinColor(math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
-            Fluent:Notify({Title = "🎨", Content = "Скин применён", Duration = 2})
         end
     end
 })
@@ -885,7 +982,6 @@ Tabs.Colors:AddButton({
         local c = Options.CustomHair.Value
         if c then
             setHairColor(math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
-            Fluent:Notify({Title = "🎨", Content = "Волосы применены", Duration = 2})
         end
     end
 })
@@ -927,34 +1023,40 @@ end)
 
 --> [< ГЛАВНЫЙ ЦИКЛ >] <--
 
+settings.ListeningForAimBind = false
+
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     
-    -- ✅ ОБРАБОТКА НАЗНАЧЕНИЯ КЛАВИШИ
+    -- Назначение клавиши Silent Aim
     if silentAim.ListeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             silentAim.HoldKey = input.KeyCode
             silentAim.ListeningForBind = false
-            
             pcall(function()
                 silentBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name)
             end)
-            
-            Fluent:Notify({
-                Title = "✅ Клавиша назначена",
-                Content = "Silent Aim активируется на: " .. input.KeyCode.Name,
-                Duration = 3
-            })
+            Fluent:Notify({Title = "✅", Content = "Silent: " .. input.KeyCode.Name, Duration = 3})
         end
         return
     end
     
-    -- Обработка Toggle режима Silent Aim
+    -- Назначение клавиши Aimbot
+    if settings.ListeningForAimBind then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            settings.key = input.KeyCode.Name
+            settings.ListeningForAimBind = false
+            Fluent:Notify({Title = "✅", Content = "Aimbot: " .. input.KeyCode.Name, Duration = 3})
+        end
+        return
+    end
+    
+    -- Toggle режим Silent Aim
     if silentAim.MasterEnabled and silentAim.Mode == "Toggle" then
         if input.KeyCode == silentAim.HoldKey then
             silentAim.Enabled = not silentAim.Enabled
             Fluent:Notify({
-                Title = silentAim.Enabled and "🎭 Silent Aim АКТИВЕН" or "🎭 Silent Aim ВЫКЛ",
+                Title = silentAim.Enabled and "🎭 Silent ON" or "🎭 Silent OFF",
                 Content = "Toggle",
                 Duration = 1
             })
@@ -963,8 +1065,8 @@ UserInputService.InputBegan:Connect(function(input, gp)
     
     -- Aimbot
     if not aimbotEnabled then return end
-    local k = settings.key == "BackSlash" and Enum.KeyCode.BackSlash or Enum[settings.key]
-    if k and input.KeyCode == k then
+    local k = input.KeyCode.Name == settings.key and input.KeyCode or nil
+    if k then
         if settings.aimMode == "Hold" then aiming = true
         else aiming = not aiming; if not aiming then currentTarget = nil end end
     end
@@ -972,8 +1074,7 @@ end)
 
 UserInputService.InputEnded:Connect(function(input, gp)
     if gp or not aimbotEnabled or settings.aimMode ~= "Hold" then return end
-    local k = settings.key == "BackSlash" and Enum.KeyCode.BackSlash or Enum[settings.key]
-    if k and input.KeyCode == k then aiming = false; currentTarget = nil end
+    if input.KeyCode.Name == settings.key then aiming = false; currentTarget = nil end
 end)
 
 RunService.RenderStepped:Connect(function()
@@ -984,7 +1085,8 @@ RunService.RenderStepped:Connect(function()
         Lighting.OutdoorAmbient = c
     end
     
-    if aimbotEnabled and fovCircle and settings.showFovCircle then
+    -- Aimbot FOV circle
+    if aimbotEnabled and fovCircle and settings.showFovCircle and not settings.mode360 then
         fovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
         fovCircle.Visible = true
         if settings.rainbowFov then
@@ -997,6 +1099,16 @@ RunService.RenderStepped:Connect(function()
         end
     elseif fovCircle then
         fovCircle.Visible = false
+    end
+    
+    -- Silent Aim FOV circle
+    if silentAim.MasterEnabled and silentFovCircle and silentAim.ShowFovCircle and not silentAim.Mode360 then
+        silentFovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
+        silentFovCircle.Radius = silentAim.FOV
+        silentFovCircle.Color = silentAim.FovColor
+        silentFovCircle.Visible = silentAim.Enabled
+    elseif silentFovCircle then
+        silentFovCircle.Visible = false
     end
     
     if aiming then
@@ -1079,9 +1191,10 @@ pcall(function()
 end)
 
 print("====================================")
-print("✅ Universal Shindo v6.1 загружен!")
-print("🎭 Silent Aim: назначаемая клавиша через кнопку BIND")
-print("🎨 Colors: clamp(1-254) + инверсия")
-print("👁️ ESP: CHI/STAM")
+print("✅ Universal Shindo v7.0 загружен!")
+print("🎯 Aimbot: FOV/MaxDist/Prioritize/360°")
+print("🎭 Silent Aim: FOV/MaxDist/Prioritize/360°")
+print("🔍 CHI/STAM: рекурсивный поиск")
+print("❌ Кнопки Hide Menu и Close Script удалены")
 print("📌 RightControl - скрыть меню")
 print("====================================")
