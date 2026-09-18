@@ -1,242 +1,176 @@
 --[[
-    Universal Aimbot v3.3 (Fluent UI)
-    GitHub: https://github.com/elvinsz/simple-universal-aimbot
-    Функции: Aimbot, Silent Aim, Visual Effects, Server Tools, Пинг, Регион
+    Shindo Life Cheat v1.0 (Fluent UI)
+    Функции: Silent Aim, ESP, Color Changer
+    Для игры Shindo Life
 ]]
 
-if getgenv().UniversalAimbotLoaded then
-    print("⚠️ Universal Aimbot уже загружен!")
+if getgenv().ShindoCheatLoaded then
+    print("⚠️ Shindo Cheat уже загружен!")
     return
 end
-getgenv().UniversalAimbotLoaded = true
+getgenv().ShindoCheatLoaded = true
 
--- Загрузка Fluent UI + Addons
-print("🔄 Загрузка Fluent UI...")
+-- Загрузка Fluent UI
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
 if not Fluent then
     warn("❌ Fluent UI не загружен!")
-    getgenv().UniversalAimbotLoaded = false
+    getgenv().ShindoCheatLoaded = false
     return
 end
-print("✅ Fluent UI загружен!")
 
 -- Сервисы
-local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
 local Lighting = game:GetService("Lighting")
-local TeleportService = game:GetService("TeleportService")
-local LocalizationService = game:GetService("LocalizationService")
-local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
-local Mouse = LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
 
---> [< НАСТРОЙКИ >] <--
-
-local settings = {
-    fov = 300,
-    smoothing = 0.15,
-    prediction = 0.065,
-    wallCheck = false,
-    stickyAim = false,
-    teamCheck = false,
-    healthCheck = false,
-    minHealth = 0,
-    aimPart = "Auto",
-    aimMode = "Hold",
-    key = "BackSlash",
-    showFovCircle = true,
-    maxDistance = 5000,
-    prioritizeClose = true,
-    rainbowFov = false,
-    fovColor = Color3.fromRGB(255, 0, 0),
-    targetedColor = Color3.fromRGB(0, 255, 0),
-    xray = false,
-    fullBright = false,
-    nightVision = false,
-    noShadows = false,
-    noBloom = false,
-    noSunRays = false,
-    rainbowLighting = false,
-    noFog = false
-}
-
-local silentAimSettings = {
-    Enabled = false,
-    TeamCheck = false,
-    VisibleCheck = false,
-    TargetPart = "HumanoidRootPart",
-    FOVRadius = 130,
-    HitChance = 100
-}
-
-local originalLighting = {
-    Ambient = Lighting.Ambient,
-    OutdoorAmbient = Lighting.OutdoorAmbient,
-    Brightness = Lighting.Brightness,
-    ClockTime = Lighting.ClockTime,
-    FogEnd = Lighting.FogEnd,
-    FogStart = Lighting.FogStart,
-    GlobalShadows = Lighting.GlobalShadows
-}
-
-local aimbotEnabled = false
-local aiming = false
-local currentTarget = nil
-local lastTargetUpdate = 0
-local targetUpdateInterval = 0.05
-
-local ALL_BODY_PARTS = {
-    "Head", "HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso",
-    "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm",
-    "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg",
-    "LeftHand", "RightHand", "LeftFoot", "RightFoot"
-}
-
-local hue = 0
-local rainbowSpeed = 0.005
-local lightingHue = 0
-
-local fovCircle
+-- Ожидание event
+local event
 pcall(function()
-    fovCircle = Drawing.new("Circle")
-    fovCircle.Thickness = 2
-    fovCircle.Radius = settings.fov
-    fovCircle.Filled = false
-    fovCircle.Color = settings.fovColor
-    fovCircle.Transparency = 1
-    fovCircle.Visible = false
+    event = LocalPlayer:WaitForChild("startevent", 10)
 end)
 
---> [< ПИНГ И РЕГИОН >] <--
-
-local function getPlayerPing()
-    local success, ping = pcall(function()
-        return LocalPlayer:GetNetworkPing()
-    end)
-    if success and ping then
-        return math.floor(ping * 1000)
-    end
-    return 0
+if not event then
+    warn("❌ Не удалось найти 'startevent'. Убедитесь, что вы в игре Shindo Life.")
 end
 
-local function getServerRegion()
-    local success, region = pcall(function()
-        local firstPlayer = Players:GetPlayers()[1]
-        if not firstPlayer then firstPlayer = LocalPlayer end
-        return LocalizationService:GetCountryRegionForPlayerAsync(firstPlayer)
-    end)
-    if success and region then
-        return tostring(region)
-    end
-    return "Unknown"
-end
+--> [< ПЕРЕМЕННЫЕ >] <--
+
+-- Silent Aim
+local silentAimEnabled = false
+local silentAimFOV = 150
+local silentAimPrediction = 0.15
+local silentAimTarget = nil
+local silentAimCFrame = nil
+local silentAimHitChance = 100
+local silentAimTeamCheck = false
+
+-- ESP
+local espEnabled = false
+local espSettings = {
+    ShowName = true,
+    ShowHealth = true,
+    ShowDistance = true,
+    ShowBox = false,
+    TextColor = Color3.fromRGB(255, 255, 255),
+    HealthColor = Color3.fromRGB(0, 255, 0),
+    DistanceColor = Color3.fromRGB(255, 255, 0),
+    BoxColor = Color3.fromRGB(255, 0, 0),
+    TextSize = 14,
+    UpdateRate = 0.1
+}
+local espObjects = {}
+local espLastUpdate = 0
+
+-- Color Changer
+local colorSettings = {
+    RainbowSkin = false,
+    RainbowHair = false,
+    SkinSpeed = 0.5,
+    HairSpeed = 0.5,
+    RainbowUpdateRate = 0.1
+}
+local skinTimer = 0
+local hairTimer = 0
 
 --> [< SILENT AIM >] <--
 
-local silentAimHookActive = false
-local oldNamecall = nil
-local metaTable = nil
-
 local function getSilentAimTarget()
     local mousePos = UserInputService:GetMouseLocation()
-    local bestPart, bestDist = nil, nil
+    local bestPart, bestDist = nil, silentAimFOV
 
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer then continue end
-        if silentAimSettings.TeamCheck and plr.Team == LocalPlayer.Team then continue end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if silentAimTeamCheck and player.Team == LocalPlayer.Team then continue end
         
-        local char = plr.Character
+        local char = player.Character
         if not char then continue end
         
+        local part = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
         local humanoid = char:FindFirstChildOfClass("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then continue end
-        
-        local part = char:FindFirstChild(silentAimSettings.TargetPart)
-        if not part then continue end
-        
-        if silentAimSettings.VisibleCheck then
-            local parts = Camera:GetPartsObscuringTarget({part.Position}, {LocalPlayer.Character, char})
-            if #parts > 0 then continue end
-        end
+        if not part or not humanoid or humanoid.Health <= 0 then continue end
         
         local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
         if not onScreen then continue end
         
         local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
-        
-        if dist <= silentAimSettings.FOVRadius and (not bestDist or dist < bestDist) then
+        if dist < bestDist then
             bestPart = part
             bestDist = dist
         end
     end
-
+    
     return bestPart
 end
 
-local function enableSilentAim()
+-- Обновление цели каждый кадр
+RunService.Heartbeat:Connect(function()
+    if not silentAimEnabled then
+        silentAimTarget = nil
+        silentAimCFrame = nil
+        return
+    end
+    
+    silentAimTarget = getSilentAimTarget()
+    if silentAimTarget then
+        local targetPos = silentAimTarget.Position + (silentAimTarget.Velocity * silentAimPrediction)
+        silentAimCFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+    else
+        silentAimCFrame = nil
+    end
+end)
+
+-- Установка хука на FireServer
+local silentAimHookActive = false
+local originalNamecall = nil
+local metaTable = nil
+
+local function enableSilentAimHook()
     if silentAimHookActive then return end
     
     local success, err = pcall(function()
         metaTable = getrawmetatable(game)
-        oldNamecall = metaTable.__namecall
+        originalNamecall = metaTable.__namecall
         setreadonly(metaTable, false)
         
-        metaTable.__namecall = function(self, ...)
+        metaTable.__namecall = newcclosure(function(self, ...)
             local method = getnamecallmethod()
+            local args = {...}
             
-            if method == "Raycast" and self == Workspace then
-                local args = {...}
-                
-                if #args >= 2 
-                   and typeof(args[1]) == "Vector3" 
-                   and typeof(args[2]) == "Vector3" 
-                   and silentAimSettings.Enabled then
-                    
-                    local origin = args[1]
-                    local myChar = LocalPlayer.Character
-                    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-                    
-                    if myRoot and (origin - myRoot.Position).Magnitude < 15 then
-                        local ok, target = pcall(getSilentAimTarget)
-                        if ok and target and math.random(1, 100) <= silentAimSettings.HitChance then
-                            local newDir = target.Position - origin
-                            if newDir.Magnitude > 0.01 then
-                                args[2] = newDir.Unit * args[2].Magnitude
-                            end
-                        end
+            -- Перехватываем FireServer для события "update" с "fixmouse"
+            if method == "FireServer" and self.Name == "update" and args[1] == "fixmouse" then
+                if silentAimEnabled and silentAimCFrame then
+                    if math.random(1, 100) <= silentAimHitChance then
+                        args[2] = silentAimCFrame
                     end
-                    
-                    return oldNamecall(self, unpack(args))
                 end
             end
             
-            return oldNamecall(self, ...)
-        end
+            return originalNamecall(self, unpack(args))
+        end)
         
         setreadonly(metaTable, true)
         silentAimHookActive = true
-        print("✅ Silent Aim хук установлен (безопасный режим)")
+        print("✅ Silent Aim хук установлен")
     end)
     
     if not success then
         warn("❌ Silent Aim не поддерживается: " .. tostring(err))
-        silentAimSettings.Enabled = false
     end
 end
 
-local function disableSilentAim()
-    if metaTable and oldNamecall then
+local function disableSilentAimHook()
+    if metaTable and originalNamecall then
         pcall(function()
             setreadonly(metaTable, false)
-            metaTable.__namecall = oldNamecall
+            metaTable.__namecall = originalNamecall
             setreadonly(metaTable, true)
         end)
     end
@@ -244,348 +178,179 @@ local function disableSilentAim()
     print("✅ Silent Aim хук снят")
 end
 
---> [< ВИЗУАЛЬНЫЕ ФУНКЦИИ >] <--
+--> [< ESP >] <--
 
-local function setXRay(enabled)
-    settings.xray = enabled
-    pcall(function()
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                if enabled then
-                    if not obj:GetAttribute("OrigTransparency") then
-                        obj:SetAttribute("OrigTransparency", obj.Transparency)
-                    end
-                    obj.LocalTransparencyModifier = 0.5
-                else
-                    local orig = obj:GetAttribute("OrigTransparency")
-                    if orig then obj.LocalTransparencyModifier = orig end
-                end
-            end
-        end
-    end)
-end
-
-local function setFullBright(enabled)
-    settings.fullBright = enabled
-    if enabled then
-        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-        Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-        Lighting.Brightness = 3
-        Lighting.ClockTime = 12
-    else
-        Lighting.Ambient = originalLighting.Ambient
-        Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
-        Lighting.Brightness = originalLighting.Brightness
-        Lighting.ClockTime = originalLighting.ClockTime
-    end
-end
-
-local function setNightVision(enabled)
-    settings.nightVision = enabled
-    pcall(function()
-        if enabled then
-            local nv = Lighting:FindFirstChild("NVEffect")
-            if not nv then
-                nv = Instance.new("ColorCorrectionEffect")
-                nv.Name = "NVEffect"
-                nv.Brightness = 0.3
-                nv.Contrast = 0.5
-                nv.Saturation = -0.5
-                nv.TintColor = Color3.fromRGB(0, 255, 0)
-                nv.Parent = Lighting
-            end
-            nv.Enabled = true
-        else
-            local nv = Lighting:FindFirstChild("NVEffect")
-            if nv then nv.Enabled = false end
-        end
-    end)
-end
-
-local function setNoShadows(enabled)
-    settings.noShadows = enabled
-    Lighting.GlobalShadows = not enabled
-end
-
-local function setNoBloom(enabled)
-    settings.noBloom = enabled
-    pcall(function()
-        for _, effect in ipairs(Lighting:GetChildren()) do
-            if effect:IsA("BloomEffect") then effect.Enabled = not enabled end
-        end
-    end)
-end
-
-local function setNoSunRays(enabled)
-    settings.noSunRays = enabled
-    pcall(function()
-        for _, effect in ipairs(Lighting:GetChildren()) do
-            if effect:IsA("SunRaysEffect") then effect.Enabled = not enabled end
-        end
-    end)
-end
-
-local function setRainbowLighting(enabled)
-    settings.rainbowLighting = enabled
-    if not enabled then
-        Lighting.Ambient = originalLighting.Ambient
-        Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
-    end
-end
-
-local function setNoFog(enabled)
-    settings.noFog = enabled
-    if enabled then
-        Lighting.FogEnd = 100000
-        Lighting.FogStart = 100000
-    else
-        Lighting.FogEnd = originalLighting.FogEnd
-        Lighting.FogStart = originalLighting.FogStart
-    end
-end
-
---> [< ФУНКЦИИ АИМБОТА >] <--
-
-local function closeScript()
-    pcall(function()
-        if fovCircle then
-            fovCircle.Visible = false
-            fovCircle:Remove()
-        end
-    end)
-    pcall(function()
-        if Window then Window:Destroy() end
-    end)
-    getgenv().UniversalAimbotLoaded = false
-    print("✅ Скрипт закрыт")
-end
-
-local function getBestAimPart(character)
-    if not character then return nil end
+local function createESP(player)
+    if player == LocalPlayer then return end
+    if espObjects[player] then return end
+    if not player.Character then return end
     
-    if settings.aimPart and settings.aimPart ~= "Auto" then
-        local part = character:FindFirstChild(settings.aimPart)
-        if part and part:IsA("BasePart") then return part end
-        
-        if settings.aimPart == "Torso" then
-            local ut = character:FindFirstChild("UpperTorso")
-            if ut and ut:IsA("BasePart") then return ut end
-            local lt = character:FindFirstChild("LowerTorso")
-            if lt and lt:IsA("BasePart") then return lt end
+    local head = player.Character:FindFirstChild("Head")
+    local root = player.Character:FindFirstChild("HumanoidRootPart")
+    if not head and not root then return end
+    
+    -- Основной BillboardGui
+    local gui = Instance.new("BillboardGui")
+    gui.Name = "ShindoESP"
+    gui.Size = UDim2.new(0, 200, 0, 60)
+    gui.StudsOffset = Vector3.new(0, 3.5, 0)
+    gui.AlwaysOnTop = true
+    gui.ResetOnSpawn = false
+    gui.Adornee = head or root
+    gui.Parent = player.Character
+    
+    -- Имя игрока
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(1, 0, 0.33, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = player.Name
+    nameLabel.TextColor3 = espSettings.TextColor
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextSize = espSettings.TextSize
+    nameLabel.TextScaled = false
+    nameLabel.Parent = gui
+    
+    -- Здоровье
+    local hpLabel = Instance.new("TextLabel")
+    hpLabel.Name = "HpLabel"
+    hpLabel.Size = UDim2.new(1, 0, 0.33, 0)
+    hpLabel.Position = UDim2.new(0, 0, 0.33, 0)
+    hpLabel.BackgroundTransparency = 1
+    hpLabel.TextColor3 = espSettings.HealthColor
+    hpLabel.TextStrokeTransparency = 0
+    hpLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    hpLabel.Font = Enum.Font.GothamBold
+    hpLabel.TextSize = espSettings.TextSize
+    hpLabel.TextScaled = false
+    hpLabel.Parent = gui
+    
+    -- Дистанция
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Name = "DistLabel"
+    distLabel.Size = UDim2.new(1, 0, 0.33, 0)
+    distLabel.Position = UDim2.new(0, 0, 0.66, 0)
+    distLabel.BackgroundTransparency = 1
+    distLabel.TextColor3 = espSettings.DistanceColor
+    distLabel.TextStrokeTransparency = 0
+    distLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    distLabel.Font = Enum.Font.GothamBold
+    distLabel.TextSize = espSettings.TextSize
+    distLabel.TextScaled = false
+    distLabel.Parent = gui
+    
+    espObjects[player] = {
+        gui = gui,
+        nameLabel = nameLabel,
+        hpLabel = hpLabel,
+        distLabel = distLabel,
+        character = player.Character
+    }
+end
+
+local function removeESP(player)
+    local obj = espObjects[player]
+    if obj and obj.gui then
+        obj.gui:Destroy()
+    end
+    espObjects[player] = nil
+end
+
+local function updateESP()
+    for player, obj in pairs(espObjects) do
+        if not player.Parent or not player.Character then
+            removeESP(player)
+            continue
         end
         
-        local fallbacks = {"Head", "HumanoidRootPart", "UpperTorso", "Torso"}
-        for _, name in ipairs(fallbacks) do
-            local part = character:FindFirstChild(name)
-            if part and part:IsA("BasePart") then return part end
+        -- Обновляем Adornee если персонаж переродился
+        if obj.character ~= player.Character then
+            removeESP(player)
+            if espEnabled then createESP(player) end
+            continue
         end
-        return nil
-    end
-    
-    local cameraPos = Camera.CFrame.Position
-    local bestPart, bestDistance = nil, math.huge
-    
-    for _, partName in ipairs(ALL_BODY_PARTS) do
-        local part = character:FindFirstChild(partName)
-        if part and part:IsA("BasePart") then
-            local dist = (part.Position - cameraPos).Magnitude
-            if dist < bestDistance then
-                bestDistance = dist
-                bestPart = part
+        
+        local head = player.Character:FindFirstChild("Head")
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        
+        if not head or not humanoid or humanoid.Health <= 0 then
+            if obj.gui then obj.gui.Enabled = false end
+            continue
+        end
+        
+        if obj.gui then
+            obj.gui.Enabled = espEnabled
+            obj.gui.Adornee = head
+        end
+        
+        -- Обновляем имя
+        if obj.nameLabel then
+            obj.nameLabel.Visible = espSettings.ShowName
+            obj.nameLabel.TextColor3 = espSettings.TextColor
+        end
+        
+        -- Обновляем здоровье
+        if obj.hpLabel then
+            obj.hpLabel.Visible = espSettings.ShowHealth
+            obj.hpLabel.TextColor3 = espSettings.HealthColor
+            obj.hpLabel.Text = string.format("HP: %d / %d", 
+                math.floor(humanoid.Health), 
+                math.floor(humanoid.MaxHealth))
+        end
+        
+        -- Обновляем дистанцию
+        if obj.distLabel then
+            obj.distLabel.Visible = espSettings.ShowDistance
+            obj.distLabel.TextColor3 = espSettings.DistanceColor
+            local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if myRoot then
+                local dist = (head.Position - myRoot.Position).Magnitude
+                obj.distLabel.Text = string.format("[%d m]", math.floor(dist))
             end
         end
     end
-    
-    if not bestPart then
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("BasePart") and child.Name ~= "HumanoidRootPart" then
-                local dist = (child.Position - cameraPos).Magnitude
-                if dist < bestDistance then
-                    bestDistance = dist
-                    bestPart = child
-                end
-            end
-        end
+end
+
+-- Отслеживание игроков
+Players.PlayerAdded:Connect(function(player)
+    if espEnabled then
+        player.CharacterAdded:Connect(function()
+            task.wait(0.5)
+            if espEnabled then createESP(player) end
+        end)
     end
-    
-    return bestPart
-end
+end)
 
-local function isSameTeam(player)
-    if not settings.teamCheck then return false end
-    if not player.Team or not LocalPlayer.Team then return false end
-    return player.Team == LocalPlayer.Team
-end
+Players.PlayerRemoving:Connect(function(player)
+    removeESP(player)
+end)
 
-local function isVisible(targetCharacter)
-    if not settings.wallCheck then return true end
-    local targetPart = getBestAimPart(targetCharacter)
-    if not targetPart then return false end
-    
-    local origin = Camera.CFrame.Position
-    local direction = (targetPart.Position - origin).unit * 500
-    
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {LocalPlayer.Character, targetCharacter}
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local result = Workspace:Raycast(origin, direction, params)
-    return not result or result.Instance:IsDescendantOf(targetCharacter)
-end
+--> [< COLOR CHANGER >] <--
 
-local function getTarget()
-    local bestTarget, bestScore = nil, math.huge
-    local cameraPos = Camera.CFrame.Position
-    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-    
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        if isSameTeam(player) then continue end
-        
-        local character = player.Character
-        if not character then continue end
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then continue end
-        if settings.healthCheck and humanoid.Health < settings.minHealth then continue end
-        
-        local targetPart = getBestAimPart(character)
-        if not targetPart then continue end
-        
-        if settings.maxDistance > 0 then
-            local rootPart = character:FindFirstChild("HumanoidRootPart")
-            if rootPart and (rootPart.Position - cameraPos).Magnitude > settings.maxDistance then
-                continue
-            end
-        end
-        
-        if not isVisible(character) then continue end
-        
-        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-        if not onScreen then continue end
-        
-        local cursorDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-        if cursorDist > settings.fov then continue end
-        
-        local distance = (targetPart.Position - cameraPos).Magnitude
-        local score = settings.prioritizeClose
-            and ((distance * 0.7) + (cursorDist * 0.3))
-            or ((cursorDist * 0.7) + (distance * 0.3))
-        
-        if score < bestScore then
-            bestScore = score
-            bestTarget = player
-        end
-    end
-    
-    return bestTarget
-end
-
-local function getPredictedPosition(player)
-    if not player or not player.Character then return nil end
-    local targetPart = getBestAimPart(player.Character)
-    if not targetPart then return nil end
-    
-    local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return targetPart.Position end
-    
-    return targetPart.Position + (rootPart.Velocity * settings.prediction)
-end
-
-local function smoothAim(targetPosition)
-    local currentCFrame = Camera.CFrame
-    local targetCFrame = CFrame.new(currentCFrame.Position, targetPosition)
-    local lerpFactor = math.clamp(1 - settings.smoothing, 0.05, 1)
-    Camera.CFrame = currentCFrame:Lerp(targetCFrame, lerpFactor)
-end
-
-local function aimAtTarget(player)
-    if not player or not player.Character then return end
-    local humanoid = player.Character:FindFirstChild("Humanoid")
-    if not humanoid or humanoid.Health <= 0 then return end
-    
-    local targetPos = getPredictedPosition(player)
-    if targetPos then smoothAim(targetPos) end
-end
-
---> [< СЕРВЕР ФУНКЦИИ >] <--
-
-local function serverHop()
-    Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск сервера...", Duration = 3})
+local function setSkinColor(r, g, b)
+    if not event then return end
+    -- В Shindo Life цвета инвертированы: 255 - значение
+    local colorString = string.format("%d,%d,%d", 255 - r, 255 - g, 255 - b)
     pcall(function()
-        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
-        local response = game:HttpGet(url)
-        local servers = HttpService:JSONDecode(response)
-        local available = {}
-        
-        for _, s in ipairs(servers.data) do
-            if s.playing < s.maxPlayers and s.id ~= game.JobId then
-                table.insert(available, s.id)
-            end
-        end
-        
-        if #available > 0 then
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, available[math.random(1, #available)], LocalPlayer)
-        else
-            Fluent:Notify({Title = "❌ Ошибка", Content = "Нет серверов", Duration = 3})
-        end
+        event:FireServer("skin", colorString)
     end)
 end
 
-local function rejoinServer()
-    Fluent:Notify({Title = "🔁 Rejoin", Content = "Переподключение...", Duration = 3})
+local function setHairColor(r, g, b)
+    if not event then return end
+    local colorString = string.format("%d,%d,%d", 255 - r, 255 - g, 255 - b)
     pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+        event:FireServer("haircolor", colorString)
     end)
 end
 
-local function forceReconnect()
-    Fluent:Notify({Title = "⚡ Force Reconnect", Content = "Переподключение...", Duration = 3})
-    pcall(function()
-        for i = 1, 3 do
-            local ok = pcall(function()
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-            end)
-            if ok then return end
-            task.wait(1)
-        end
-        TeleportService:Teleport(game.PlaceId, LocalPlayer)
-    end)
-end
-
-local function rejoinGame()
-    Fluent:Notify({Title = "🎮 Rejoin Game", Content = "Переподключение...", Duration = 3})
-    pcall(function()
-        TeleportService:Teleport(game.PlaceId, LocalPlayer)
-    end)
-end
-
-local function createAndJoinNewServer()
-    Fluent:Notify({
-        Title = "🔄 Создание сервера",
-        Content = "Генерация нового сервера...",
-        Duration = 3
-    })
-
-    local success, err = pcall(function()
-        local accessCode = TeleportService:ReserveServer(game.PlaceId)
-        TeleportService:TeleportToPrivateServer(game.PlaceId, accessCode, {LocalPlayer})
-    end)
-
-    if not success then
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = "Не удалось создать сервер: " .. tostring(err),
-            Duration = 5
-        })
-    end
-end
-
---> [< GUI >] <--
+--> [< GUI (FLUENT) >] <--
 
 local Window = Fluent:CreateWindow({
-    Title = "Universal Aimbot",
-    SubTitle = "by Agreed 🥵",
+    Title = "Shindo Life Cheat",
+    SubTitle = "Silent Aim • ESP • Color Changer",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
     Acrylic = true,
@@ -594,95 +359,19 @@ local Window = Fluent:CreateWindow({
 })
 
 local Tabs = {
-    Aimbot = Window:AddTab({ Title = "Aimbot 🎯", Icon = "crosshair" }),
-    SilentAim = Window:AddTab({ Title = "Silent Aim 🎭", Icon = "eye-off" }),
-    Visual = Window:AddTab({ Title = "Visual 👁️", Icon = "eye" }),
-    Server = Window:AddTab({ Title = "Server 🌐", Icon = "globe" }),
-    ["UI Settings"] = Window:AddTab({ Title = "UI Settings", Icon = "palette" })
+    SilentAim = Window:AddTab({ Title = "Silent Aim 🎯", Icon = "crosshair" }),
+    ESP = Window:AddTab({ Title = "ESP 👁️", Icon = "eye" }),
+    Colors = Window:AddTab({ Title = "Colors 🎨", Icon = "palette" }),
+    UI = Window:AddTab({ Title = "UI Settings", Icon = "settings" })
 }
 
 local Options = Fluent.Options
 
---> [< ВКЛАДКА AIMBOT >] <--
-
-Tabs.Aimbot:AddToggle("AimbotEnabled", {
-    Title = "Enable Aimbot",
-    Description = "Включить аимбот",
-    Default = false
-}):OnChanged(function(Value)
-    aimbotEnabled = Value
-    if fovCircle then fovCircle.Visible = settings.showFovCircle and Value end
-    if not Value then
-        aiming = false
-        currentTarget = nil
-    end
-end)
-
-Tabs.Aimbot:AddButton({
-    Title = "👁️ Hide Menu",
-    Callback = function() Window:Toggle() end
-})
-
-Tabs.Aimbot:AddButton({
-    Title = "🔴 Close Script",
-    Callback = function() closeScript() end
-})
-
-Tabs.Aimbot:AddDropdown("ActivationKey", {
-    Title = "Activation Key",
-    Values = {"BackSlash (\\)", "LeftControl", "RightControl", "LeftShift", "RightShift", "F", "Q", "E", "R", "T"},
-    Default = 1,
-    Multi = false
-}):OnChanged(function(Value)
-    if Value == "BackSlash (\\)" then settings.key = "BackSlash"
-    elseif Value == "LeftControl" then settings.key = "LeftControl"
-    elseif Value == "RightControl" then settings.key = "RightControl"
-    elseif Value == "LeftShift" then settings.key = "LeftShift"
-    elseif Value == "RightShift" then settings.key = "RightShift"
-    elseif Value == "F" then settings.key = "F"
-    elseif Value == "Q" then settings.key = "Q"
-    elseif Value == "E" then settings.key = "E"
-    elseif Value == "R" then settings.key = "R"
-    elseif Value == "T" then settings.key = "T"
-    end
-end)
-
-Tabs.Aimbot:AddDropdown("AimPart", {
-    Title = "Aim Part",
-    Values = {
-        "Auto (Best Available)", "Head", "HumanoidRootPart", "UpperTorso",
-        "Torso", "LowerTorso", "LeftUpperArm", "RightUpperArm",
-        "LeftLowerArm", "RightLowerArm", "LeftUpperLeg", "RightUpperLeg",
-        "LeftLowerLeg", "RightLowerLeg", "LeftHand", "RightHand",
-        "LeftFoot", "RightFoot"
-    },
-    Default = 1,
-    Multi = false
-}):OnChanged(function(Value)
-    if Value == "Auto (Best Available)" then
-        settings.aimPart = "Auto"
-    else
-        settings.aimPart = Value
-    end
-end)
-
-Tabs.Aimbot:AddToggle("ToggleMode", {Title = "Toggle Mode", Default = false}):OnChanged(function(Value) settings.aimMode = Value and "Toggle" or "Hold" end)
-Tabs.Aimbot:AddSlider("FOVSize", {Title = "FOV Size", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(Value) settings.fov = Value; if fovCircle then fovCircle.Radius = Value end end)
-Tabs.Aimbot:AddSlider("MaxDistance", {Title = "Max Distance", Default = 5000, Min = 0, Max = 5000, Rounding = 0}):OnChanged(function(Value) settings.maxDistance = Value end)
-Tabs.Aimbot:AddToggle("PrioritizeClose", {Title = "Prioritize Close Targets", Default = true}):OnChanged(function(Value) settings.prioritizeClose = Value end)
-Tabs.Aimbot:AddSlider("Smoothing", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(Value) settings.smoothing = Value / 100 end)
-Tabs.Aimbot:AddSlider("Prediction", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(Value) settings.prediction = Value / 100 end)
-Tabs.Aimbot:AddToggle("WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(Value) settings.wallCheck = Value end)
-Tabs.Aimbot:AddToggle("StickyAim", {Title = "Sticky Aim", Default = false}):OnChanged(function(Value) settings.stickyAim = Value end)
-Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(Value) settings.teamCheck = Value end)
-Tabs.Aimbot:AddToggle("HealthCheck", {Title = "Health Check", Default = false}):OnChanged(function(Value) settings.healthCheck = Value end)
-Tabs.Aimbot:AddSlider("MinHealth", {Title = "Min Health", Default = 0, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(Value) settings.minHealth = Value end)
-
 --> [< ВКЛАДКА SILENT AIM >] <--
 
 Tabs.SilentAim:AddParagraph({
-    Title = "🎭 Silent Aim",
-    Content = "Тихая подмена направления выстрела через хук Raycast. Работает только если инжектор поддерживает getrawmetatable."
+    Title = "🎯 Silent Aim",
+    Content = "Тихая подмена направления атаки через хук FireServer. Работает только в Shindo Life."
 })
 
 Tabs.SilentAim:AddToggle("SilentAimEnabled", {
@@ -690,43 +379,40 @@ Tabs.SilentAim:AddToggle("SilentAimEnabled", {
     Description = "Включить Silent Aim",
     Default = false
 }):OnChanged(function(Value)
-    silentAimSettings.Enabled = Value
+    silentAimEnabled = Value
     if Value then
-        enableSilentAim()
+        enableSilentAimHook()
     else
-        disableSilentAim()
+        disableSilentAimHook()
     end
-end)
-
-Tabs.SilentAim:AddToggle("SilentAimTeamCheck", {
-    Title = "Team Check",
-    Description = "Не целиться в союзников",
-    Default = false
-}):OnChanged(function(Value) silentAimSettings.TeamCheck = Value end)
-
-Tabs.SilentAim:AddToggle("SilentAimVisibleCheck", {
-    Title = "Visible Check",
-    Description = "Только видимые цели",
-    Default = false
-}):OnChanged(function(Value) silentAimSettings.VisibleCheck = Value end)
-
-Tabs.SilentAim:AddDropdown("SilentAimTargetPart", {
-    Title = "Target Part",
-    Values = {"Head", "HumanoidRootPart", "UpperTorso", "Torso"},
-    Default = 2,
-    Multi = false
-}):OnChanged(function(Value)
-    silentAimSettings.TargetPart = Value
+    Fluent:Notify({
+        Title = Value and "🎯 Silent Aim ВКЛ" or "🎯 Silent Aim ВЫКЛ",
+        Content = Value and "Активирован" or "Деактивирован",
+        Duration = 2
+    })
 end)
 
 Tabs.SilentAim:AddSlider("SilentAimFOV", {
     Title = "FOV Radius",
     Description = "Радиус поиска цели (пиксели)",
-    Default = 130,
-    Min = 0,
-    Max = 500,
+    Default = 150,
+    Min = 10,
+    Max = 800,
     Rounding = 0
-}):OnChanged(function(Value) silentAimSettings.FOVRadius = Value end)
+}):OnChanged(function(Value)
+    silentAimFOV = Value
+end)
+
+Tabs.SilentAim:AddSlider("SilentAimPrediction", {
+    Title = "Prediction",
+    Description = "Предсказание движения цели",
+    Default = 15,
+    Min = 0,
+    Max = 50,
+    Rounding = 0
+}):OnChanged(function(Value)
+    silentAimPrediction = Value / 100
+end)
 
 Tabs.SilentAim:AddSlider("SilentAimHitChance", {
     Title = "Hit Chance",
@@ -735,285 +421,324 @@ Tabs.SilentAim:AddSlider("SilentAimHitChance", {
     Min = 0,
     Max = 100,
     Rounding = 0
-}):OnChanged(function(Value) silentAimSettings.HitChance = Value end)
+}):OnChanged(function(Value)
+    silentAimHitChance = Value
+end)
 
---> [< ВКЛАДКА VISUAL >] <--
+Tabs.SilentAim:AddToggle("SilentAimTeamCheck", {
+    Title = "Team Check",
+    Description = "Не атаковать союзников",
+    Default = false
+}):OnChanged(function(Value)
+    silentAimTeamCheck = Value
+end)
 
-local VisualSection = Tabs.Visual:AddSection("World Visuals")
-
-VisualSection:AddToggle("XRay", {Title = "X-Ray", Default = false}):OnChanged(function(Value) setXRay(Value) end)
-VisualSection:AddToggle("FullBright", {Title = "Full Bright", Default = false}):OnChanged(function(Value) setFullBright(Value) end)
-VisualSection:AddToggle("NightVision", {Title = "Night Vision", Default = false}):OnChanged(function(Value) setNightVision(Value) end)
-VisualSection:AddToggle("NoShadows", {Title = "No Shadows", Default = false}):OnChanged(function(Value) setNoShadows(Value) end)
-VisualSection:AddToggle("NoBloom", {Title = "No Bloom", Default = false}):OnChanged(function(Value) setNoBloom(Value) end)
-VisualSection:AddToggle("NoSunRays", {Title = "No Sun Rays", Default = false}):OnChanged(function(Value) setNoSunRays(Value) end)
-VisualSection:AddToggle("RainbowLighting", {Title = "Rainbow Lighting", Default = false}):OnChanged(function(Value) setRainbowLighting(Value) end)
-VisualSection:AddToggle("NoFog", {Title = "No Fog", Default = false}):OnChanged(function(Value) setNoFog(Value) end)
-
-VisualSection:AddButton({
-    Title = "🔄 Reset Visual Effects",
+Tabs.SilentAim:AddButton({
+    Title = "🔄 Сбросить хук",
+    Description = "Переустановить хук (если не работает)",
     Callback = function()
-        setXRay(false); setFullBright(false); setNightVision(false)
-        setNoShadows(false); setNoBloom(false); setNoSunRays(false)
-        setRainbowLighting(false); setNoFog(false)
-        Fluent:Notify({Title = "🔄 Reset", Content = "Эффекты сброшены", Duration = 2})
-    end
-})
-
-local FOVSection = Tabs.Visual:AddSection("FOV Circle")
-
-FOVSection:AddToggle("ShowFOVCircle", {Title = "Show FOV Circle", Default = true}):OnChanged(function(Value)
-    settings.showFovCircle = Value
-    if fovCircle then fovCircle.Visible = Value and aimbotEnabled end
-end)
-
-FOVSection:AddColorpicker("FOVColor", {Title = "FOV Color", Default = Color3.fromRGB(255, 0, 0)}):OnChanged(function(Color)
-    settings.fovColor = Color
-    if fovCircle and not settings.rainbowFov then fovCircle.Color = Color end
-end)
-
-FOVSection:AddColorpicker("TargetedColor", {Title = "Targeted Color", Default = Color3.fromRGB(0, 255, 0)}):OnChanged(function(Color) settings.targetedColor = Color end)
-FOVSection:AddToggle("RainbowFOV", {Title = "Rainbow FOV", Default = false}):OnChanged(function(Value) settings.rainbowFov = Value end)
-
---> [< ВКЛАДКА SERVER >] <--
-
-local ServerSection = Tabs.Server:AddSection("Server Actions")
-
-ServerSection:AddButton({
-    Title = "🔄 Server Hop",
-    Description = "Перейти на случайный сервер",
-    Callback = function() serverHop() end
-})
-
-ServerSection:AddButton({
-    Title = "🔁 Rejoin Server",
-    Description = "Переподключиться к текущему серверу",
-    Callback = function() rejoinServer() end
-})
-
-ServerSection:AddButton({
-    Title = "⚡ Force Reconnect",
-    Description = "Принудительное переподключение",
-    Callback = function() forceReconnect() end
-})
-
-ServerSection:AddButton({
-    Title = "🎮 Rejoin Game",
-    Description = "Переподключиться к игре",
-    Callback = function() rejoinGame() end
-})
-
-ServerSection:AddButton({
-    Title = "🏠 Создать новый сервер",
-    Description = "Создать приватный сервер и зайти на него",
-    Callback = function() createAndJoinNewServer() end
-})
-
-local InfoSection = Tabs.Server:AddSection("Server Info")
-
-local pingParagraph = InfoSection:AddParagraph({
-    Title = "📶 Пинг",
-    Content = "Загрузка..."
-})
-
-local regionParagraph = InfoSection:AddParagraph({
-    Title = "🌍 Регион сервера",
-    Content = "Определение..."
-})
-
-task.spawn(function()
-    task.wait(1)
-    while task.wait(0.5) do
-        local ping = getPlayerPing()
-        local color = "🟢"
-        if ping > 100 then color = "🟡" end
-        if ping > 200 then color = "🔴" end
-        pcall(function()
-            pingParagraph:SetDesc(string.format("%s %d ms", color, ping))
-        end)
-    end
-end)
-
-task.spawn(function()
-    task.wait(2)
-    while task.wait(10) do
-        local region = getServerRegion()
-        pcall(function()
-            regionParagraph:SetDesc("🌍 " .. region)
-        end)
-    end
-end)
-
-InfoSection:AddButton({
-    Title = "📋 Информация о сервере",
-    Callback = function()
+        disableSilentAimHook()
+        task.wait(0.3)
+        if silentAimEnabled then
+            enableSilentAimHook()
+        end
         Fluent:Notify({
-            Title = "📊 Сервер",
-            Content = "Place ID: " .. game.PlaceId .. 
-                      "\nJob ID: " .. string.sub(game.JobId, 1, 20) .. "..." ..
-                      "\nИгроков: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers ..
-                      "\nПинг: " .. getPlayerPing() .. " ms" ..
-                      "\nРегион сервера: " .. getServerRegion(),
-            Duration = 8
+            Title = "🔄 Хук обновлён",
+            Content = "Silent Aim переустановлен",
+            Duration = 2
         })
     end
 })
 
-InfoSection:AddButton({
-    Title = "📋 Скопировать Job ID",
-    Callback = function()
-        setclipboard(game.JobId)
-        Fluent:Notify({Title = "✅", Content = "Job ID скопирован", Duration = 2})
-    end
+--> [< ВКЛАДКА ESP >] <--
+
+Tabs.ESP:AddParagraph({
+    Title = "👁️ ESP",
+    Content = "Подсветка игроков через стены с информацией о здоровье, дистанции и имени."
 })
 
-InfoSection:AddButton({
-    Title = "👥 Список игроков",
-    Callback = function()
-        local list = {}
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer then table.insert(list, p.Name) end
-        end
-        
-        local text = #list > 0 and table.concat(list, ", ") or "Нет игроков"
-        if #text > 200 then text = string.sub(text, 1, 200) .. "..." end
-        
-        Fluent:Notify({Title = "👥 Игроки (" .. #list .. ")", Content = text, Duration = 8})
-    end
-})
-
---> [< ОБРАБОТКА КЛАВИШ >] <--
-
-local function getKeyCode(keyName)
-    local map = {
-        BackSlash = Enum.KeyCode.BackSlash,
-        LeftControl = Enum.KeyCode.LeftControl,
-        RightControl = Enum.KeyCode.RightControl,
-        LeftShift = Enum.KeyCode.LeftShift,
-        RightShift = Enum.KeyCode.RightShift,
-        F = Enum.KeyCode.F, Q = Enum.KeyCode.Q, E = Enum.KeyCode.E,
-        R = Enum.KeyCode.R, T = Enum.KeyCode.T
-    }
-    return map[keyName]
-end
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if not aimbotEnabled then return end
-    
-    local keyEnum = getKeyCode(settings.key)
-    if keyEnum and input.KeyCode == keyEnum then
-        if settings.aimMode == "Hold" then
-            aiming = true
-        elseif settings.aimMode == "Toggle" then
-            aiming = not aiming
-            if not aiming then currentTarget = nil end
-        end
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if gameProcessed or not aimbotEnabled then return end
-    local keyEnum = getKeyCode(settings.key)
-    if keyEnum and input.KeyCode == keyEnum and settings.aimMode == "Hold" then
-        aiming = false
-        currentTarget = nil
-    end
-end)
-
---> [< ГЛАВНЫЙ ЦИКЛ >] <--
-
-RunService.RenderStepped:Connect(function()
-    if settings.rainbowLighting then
-        lightingHue = (lightingHue + 0.005) % 1
-        local c = Color3.fromHSV(lightingHue, 1, 1)
-        Lighting.Ambient = c
-        Lighting.OutdoorAmbient = c
-    end
-    
-    if not aimbotEnabled then
-        if fovCircle then fovCircle.Visible = false end
-        return
-    end
-    
-    if fovCircle and settings.showFovCircle then
-        fovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
-        fovCircle.Visible = true
-        
-        if settings.rainbowFov then
-            hue = (hue + rainbowSpeed) % 1
-            fovCircle.Color = Color3.fromHSV(hue, 1, 1)
-        elseif aiming and currentTarget then
-            fovCircle.Color = settings.targetedColor
-        else
-            fovCircle.Color = settings.fovColor
-        end
-    elseif fovCircle then
-        fovCircle.Visible = false
-    end
-    
-    if aiming then
-        local t = tick()
-        
-        if settings.stickyAim and currentTarget then
-            local character = currentTarget.Character
-            if character then
-                local targetPart = getBestAimPart(character)
-                if targetPart then
-                    local sp = Camera:WorldToViewportPoint(targetPart.Position)
-                    local dist = (Vector2.new(sp.X, sp.Y) - Vector2.new(Mouse.X, Mouse.Y)).Magnitude
-                    if dist > settings.fov * 1.5 or not isVisible(character) then
-                        currentTarget = nil
-                    end
-                else
-                    currentTarget = nil
-                end
-            else
-                currentTarget = nil
+Tabs.ESP:AddToggle("ESPEnabled", {
+    Title = "Enable ESP",
+    Description = "Включить ESP",
+    Default = false
+}):OnChanged(function(Value)
+    espEnabled = Value
+    if Value then
+        -- Создаём ESP для всех игроков
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                createESP(player)
             end
         end
-        
-        if (not settings.stickyAim or not currentTarget) and (t - lastTargetUpdate > targetUpdateInterval) then
-            lastTargetUpdate = t
-            currentTarget = getTarget()
-        end
-        
-        if currentTarget then aimAtTarget(currentTarget) end
+        Fluent:Notify({
+            Title = "👁️ ESP ВКЛ",
+            Content = "Активирован",
+            Duration = 2
+        })
     else
-        currentTarget = nil
+        -- Удаляем все ESP
+        for player in pairs(espObjects) do
+            removeESP(player)
+        end
+        Fluent:Notify({
+            Title = "👁️ ESP ВЫКЛ",
+            Content = "Деактивирован",
+            Duration = 2
+        })
     end
 end)
 
---> [< UI SETTINGS (SaveManager + InterfaceManager) >] <--
-
-SaveManager:SetLibrary(Fluent)
-InterfaceManager:SetLibrary(Fluent)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
-InterfaceManager:SetFolder("UniversalAimbot")
-SaveManager:SetFolder("UniversalAimbot/Configs")
-
-InterfaceManager:BuildInterfaceSection(Tabs["UI Settings"])
-SaveManager:BuildConfigSection(Tabs["UI Settings"])
-
-SaveManager:LoadAutoloadConfig()
-
---> [< ОТКРЫТИЕ SERVER TAB >] <--
-
-task.spawn(function()
-    task.wait(1)
-    pcall(function()
-        Window:SelectTab(Tabs.Server)
-    end)
+Tabs.ESP:AddToggle("ESPShowName", {
+    Title = "Show Name",
+    Description = "Показывать имя игрока",
+    Default = true
+}):OnChanged(function(Value)
+    espSettings.ShowName = Value
 end)
 
+Tabs.ESP:AddToggle("ESPShowHealth", {
+    Title = "Show Health",
+    Description = "Показывать здоровье",
+    Default = true
+}):OnChanged(function(Value)
+    espSettings.ShowHealth = Value
+end)
+
+Tabs.ESP:AddToggle("ESPShowDistance", {
+    Title = "Show Distance",
+    Description = "Показывать дистанцию",
+    Default = true
+}):OnChanged(function(Value)
+    espSettings.ShowDistance = Value
+end)
+
+Tabs.ESP:AddSlider("ESPTextSize", {
+    Title = "Text Size",
+    Description = "Размер текста",
+    Default = 14,
+    Min = 8,
+    Max = 24,
+    Rounding = 0
+}):OnChanged(function(Value)
+    espSettings.TextSize = Value
+    -- Обновляем размеры
+    for _, obj in pairs(espObjects) do
+        if obj.nameLabel then obj.nameLabel.TextSize = Value end
+        if obj.hpLabel then obj.hpLabel.TextSize = Value end
+        if obj.distLabel then obj.distLabel.TextSize = Value end
+    end
+end)
+
+Tabs.ESP:AddColorpicker("ESPTextColor", {
+    Title = "Text Color",
+    Description = "Цвет имени",
+    Default = Color3.fromRGB(255, 255, 255)
+}):OnChanged(function(Color)
+    espSettings.TextColor = Color
+end)
+
+Tabs.ESP:AddColorpicker("ESPHealthColor", {
+    Title = "Health Color",
+    Description = "Цвет здоровья",
+    Default = Color3.fromRGB(0, 255, 0)
+}):OnChanged(function(Color)
+    espSettings.HealthColor = Color
+end)
+
+Tabs.ESP:AddColorpicker("ESPDistanceColor", {
+    Title = "Distance Color",
+    Description = "Цвет дистанции",
+    Default = Color3.fromRGB(255, 255, 0)
+}):OnChanged(function(Color)
+    espSettings.DistanceColor = Color
+end)
+
+--> [< ВКЛАДКА COLORS >] <--
+
+Tabs.Colors:AddParagraph({
+    Title = "🎨 Color Changer",
+    Content = "Изменение цвета скина и волос. Работает через FireServer события."
+})
+
+Tabs.Colors:AddToggle("RainbowSkin", {
+    Title = "Rainbow Skin",
+    Description = "Радужный цвет скина",
+    Default = false
+}):OnChanged(function(Value)
+    colorSettings.RainbowSkin = Value
+end)
+
+Tabs.Colors:AddToggle("RainbowHair", {
+    Title = "Rainbow Hair",
+    Description = "Радужный цвет волос",
+    Default = false
+}):OnChanged(function(Value)
+    colorSettings.RainbowHair = Value
+end)
+
+Tabs.Colors:AddSlider("SkinSpeed", {
+    Title = "Skin Rainbow Speed",
+    Description = "Скорость смены цвета скина",
+    Default = 5,
+    Min = 1,
+    Max = 30,
+    Rounding = 0
+}):OnChanged(function(Value)
+    colorSettings.SkinSpeed = Value / 10
+end)
+
+Tabs.Colors:AddSlider("HairSpeed", {
+    Title = "Hair Rainbow Speed",
+    Description = "Скорость смены цвета волос",
+    Default = 5,
+    Min = 1,
+    Max = 30,
+    Rounding = 0
+}):OnChanged(function(Value)
+    colorSettings.HairSpeed = Value / 10
+end)
+
+Tabs.Colors:AddButton({
+    Title = "🔴 Красный скин",
+    Callback = function()
+        setSkinColor(255, 0, 0)
+        Fluent:Notify({Title = "🎨 Скин", Content = "Установлен красный", Duration = 2})
+    end
+})
+
+Tabs.Colors:AddButton({
+    Title = "🟢 Зелёный скин",
+    Callback = function()
+        setSkinColor(0, 255, 0)
+        Fluent:Notify({Title = "🎨 Скин", Content = "Установлен зелёный", Duration = 2})
+    end
+})
+
+Tabs.Colors:AddButton({
+    Title = "🔵 Синий скин",
+    Callback = function()
+        setSkinColor(0, 0, 255)
+        Fluent:Notify({Title = "🎨 Скин", Content = "Установлен синий", Duration = 2})
+    end
+})
+
+Tabs.Colors:AddButton({
+    Title = "🟣 Фиолетовый скин",
+    Callback = function()
+        setSkinColor(128, 0, 255)
+        Fluent:Notify({Title = "🎨 Скин", Content = "Установлен фиолетовый", Duration = 2})
+    end
+})
+
+Tabs.Colors:AddButton({
+    Title = "⚫ Чёрный скин",
+    Callback = function()
+        setSkinColor(0, 0, 0)
+        Fluent:Notify({Title = "🎨 Скин", Content = "Установлен чёрный", Duration = 2})
+    end
+})
+
+Tabs.Colors:AddButton({
+    Title = "⚪ Белый скин",
+    Callback = function()
+        setSkinColor(255, 255, 255)
+        Fluent:Notify({Title = "🎨 Скин", Content = "Установлен белый", Duration = 2})
+    end
+})
+
+Tabs.Colors:AddColorpicker("CustomSkinColor", {
+    Title = "Кастомный цвет скина",
+    Description = "Выберите свой цвет",
+    Default = Color3.fromRGB(255, 0, 0)
+})
+
+Tabs.Colors:AddButton({
+    Title = "✅ Применить кастомный цвет",
+    Callback = function()
+        local color = Options.CustomSkinColor.Value
+        if color then
+            setSkinColor(
+                math.floor(color.R * 255),
+                math.floor(color.G * 255),
+                math.floor(color.B * 255)
+            )
+            Fluent:Notify({Title = "🎨 Скин", Content = "Применён кастомный цвет", Duration = 2})
+        end
+    end
+})
+
+--> [< ОСНОВНОЙ ЦИКЛ >] <--
+
+-- Обновление ESP
+RunService.Heartbeat:Connect(function(dt)
+    -- ESP Update
+    if espEnabled then
+        espLastUpdate = espLastUpdate + dt
+        if espLastUpdate >= espSettings.UpdateRate then
+            espLastUpdate = 0
+            updateESP()
+        end
+    end
+    
+    -- Rainbow Skin
+    if colorSettings.RainbowSkin and event then
+        skinTimer = skinTimer + dt
+        if skinTimer >= colorSettings.RainbowUpdateRate then
+            skinTimer = 0
+            local hue = (tick() * colorSettings.SkinSpeed) % 1
+            local color = Color3.fromHSV(hue, 1, 1)
+            setSkinColor(
+                math.floor(color.R * 255),
+                math.floor(color.G * 255),
+                math.floor(color.B * 255)
+            )
+        end
+    end
+    
+    -- Rainbow Hair
+    if colorSettings.RainbowHair and event then
+        hairTimer = hairTimer + dt
+        if hairTimer >= colorSettings.RainbowUpdateRate then
+            hairTimer = 0
+            local hue = (tick() * colorSettings.HairSpeed) % 1
+            local color = Color3.fromHSV(hue, 1, 1)
+            setHairColor(
+                math.floor(color.R * 255),
+                math.floor(color.G * 255),
+                math.floor(color.B * 255)
+            )
+        end
+    end
+end)
+
+--> [< АВТООБНОВЛЕНИЕ ESP ПРИ РЕСПАВНЕ >] <--
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(2)
+    if espEnabled then
+        for player in pairs(espObjects) do
+            removeESP(player)
+        end
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                createESP(player)
+            end
+        end
+    end
+end)
+
+--> [< ИНФО >] <--
+
+Fluent:Notify({
+    Title = "✅ Shindo Life Cheat загружен!",
+    Content = "Вкладки: Silent Aim, ESP, Colors",
+    Duration = 5
+})
+
 print("====================================")
-print("✅ Universal Aimbot v3.3 загружен!")
-print("📁 Конфиги: workspace/UniversalAimbot/Configs")
-print("📶 Пинг: Player:GetNetworkPing()")
-print("🌍 Регион: через первого игрока")
-print("🎭 Silent Aim: " .. (silentAimHookActive and "работает" or "не активен"))
-print("🖱️  Курсор: управление передано игре и Fluent UI")
+print("✅ Shindo Life Cheat загружен!")
 print("📌 RightControl - скрыть/показать меню")
-print("📌 \\ - активация аимбота")
+print("🎯 Silent Aim: хук FireServer (fixmouse)")
+print("👁️ ESP: BillboardGui")
+print("🎨 Colors: skin/haircolor события")
 print("====================================")
