@@ -33,7 +33,6 @@ local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local Lighting = game:GetService("Lighting")
 local TeleportService = game:GetService("TeleportService")
-local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -61,7 +60,6 @@ ensureFolders()
 --> [< НАСТРОЙКИ >] <--
 
 local settings = {
-    -- Aimbot
     fov = 300,
     smoothing = 0.15,
     prediction = 0.065,
@@ -79,8 +77,6 @@ local settings = {
     rainbowFov = false,
     fovColor = Color3.fromRGB(255, 0, 0),
     targetedColor = Color3.fromRGB(0, 255, 0),
-    
-    -- Visual
     xray = false,
     fullBright = false,
     nightVision = false,
@@ -91,7 +87,6 @@ local settings = {
     noFog = false
 }
 
--- Оригинальные значения Lighting
 local originalLighting = {
     Ambient = Lighting.Ambient,
     OutdoorAmbient = Lighting.OutdoorAmbient,
@@ -102,7 +97,6 @@ local originalLighting = {
     GlobalShadows = Lighting.GlobalShadows
 }
 
--- Переменные
 local aimbotEnabled = false
 local aiming = false
 local currentTarget = nil
@@ -131,6 +125,18 @@ pcall(function()
     fovCircle.Transparency = 1
     fovCircle.Visible = false
 end)
+
+--> [< ФУНКЦИЯ ПИНГА >] <--
+
+local function getPlayerPing()
+    local success, ping = pcall(function()
+        return LocalPlayer:GetNetworkPing()
+    end)
+    if success and ping then
+        return math.floor(ping * 1000)
+    end
+    return 0
+end
 
 --> [< ВИЗУАЛЬНЫЕ ФУНКЦИИ >] <--
 
@@ -316,21 +322,13 @@ end
 
 local function saveConfig(name)
     if not name or name == "" then
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = "Введите название конфига",
-            Duration = 3
-        })
+        Fluent:Notify({Title = "❌ Ошибка", Content = "Введите название конфига", Duration = 3})
         return false
     end
     
     name = tostring(name):gsub("[^%w_%-%. ]", "")
     if name == "" then
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = "Недопустимое название",
-            Duration = 3
-        })
+        Fluent:Notify({Title = "❌ Ошибка", Content = "Недопустимое название", Duration = 3})
         return false
     end
     
@@ -344,38 +342,24 @@ local function saveConfig(name)
     end)
     
     if success then
-        Fluent:Notify({
-            Title = "💾 Конфиг сохранён",
-            Content = name .. ".json",
-            Duration = 3
-        })
+        Fluent:Notify({Title = "💾 Конфиг сохранён", Content = name .. ".json", Duration = 3})
         print("✅ Сохранён: " .. result)
         return true
     else
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = tostring(result),
-            Duration = 4
-        })
+        Fluent:Notify({Title = "❌ Ошибка", Content = tostring(result), Duration = 4})
         return false
     end
 end
 
 local function loadConfig(name)
     if not name or name == "" or name == "Нет конфигов" then
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = "Выберите конфиг",
-            Duration = 3
-        })
+        Fluent:Notify({Title = "❌ Ошибка", Content = "Выберите конфиг", Duration = 3})
         return false
     end
     
     local success, result = pcall(function()
         local path = CONFIGS_FOLDER .. "/" .. name .. ".json"
-        if not isfile(path) then
-            error("Файл не найден")
-        end
+        if not isfile(path) then error("Файл не найден") end
         
         local json = readfile(path)
         local data = HttpService:JSONDecode(json)
@@ -384,19 +368,11 @@ local function loadConfig(name)
     end)
     
     if success then
-        Fluent:Notify({
-            Title = "📂 Загружено",
-            Content = "Конфиг: " .. result,
-            Duration = 3
-        })
+        Fluent:Notify({Title = "📂 Загружено", Content = "Конфиг: " .. result, Duration = 3})
         print("✅ Загружен: " .. result)
         return true
     else
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = tostring(result),
-            Duration = 4
-        })
+        Fluent:Notify({Title = "❌ Ошибка", Content = tostring(result), Duration = 4})
         return false
     end
 end
@@ -406,17 +382,11 @@ local function deleteConfig(name)
     
     local success = pcall(function()
         local path = CONFIGS_FOLDER .. "/" .. name .. ".json"
-        if isfile(path) then
-            delfile(path)
-        end
+        if isfile(path) then delfile(path) end
     end)
     
     if success then
-        Fluent:Notify({
-            Title = "🗑️ Удалён",
-            Content = name,
-            Duration = 2
-        })
+        Fluent:Notify({Title = "🗑️ Удалён", Content = name, Duration = 2})
         return true
     end
     return false
@@ -434,9 +404,7 @@ local function getConfigList()
             end
         end
     end)
-    if #configs == 0 then
-        table.insert(configs, "Нет конфигов")
-    end
+    if #configs == 0 then table.insert(configs, "Нет конфигов") end
     return configs
 end
 
@@ -445,10 +413,7 @@ end
 local function saveAutoExec(configName, autoLoad)
     pcall(function()
         ensureFolders()
-        local data = {
-            lastConfig = configName or "",
-            autoLoad = autoLoad or false
-        }
+        local data = {lastConfig = configName or "", autoLoad = autoLoad or false}
         writefile(AUTOEXEC_FILE, HttpService:JSONEncode(data))
     end)
 end
@@ -631,11 +596,7 @@ end
 --> [< СЕРВЕР ФУНКЦИИ >] <--
 
 local function serverHop()
-    Fluent:Notify({
-        Title = "🔄 Server Hop",
-        Content = "Поиск сервера...",
-        Duration = 3
-    })
+    Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск сервера...", Duration = 3})
     pcall(function()
         local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
         local response = game:HttpGet(url)
@@ -651,32 +612,20 @@ local function serverHop()
         if #available > 0 then
             TeleportService:TeleportToPlaceInstance(game.PlaceId, available[math.random(1, #available)], LocalPlayer)
         else
-            Fluent:Notify({
-                Title = "❌ Ошибка",
-                Content = "Нет серверов",
-                Duration = 3
-            })
+            Fluent:Notify({Title = "❌ Ошибка", Content = "Нет серверов", Duration = 3})
         end
     end)
 end
 
 local function rejoinServer()
-    Fluent:Notify({
-        Title = "🔁 Rejoin",
-        Content = "Переподключение...",
-        Duration = 3
-    })
+    Fluent:Notify({Title = "🔁 Rejoin", Content = "Переподключение...", Duration = 3})
     pcall(function()
         TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
     end)
 end
 
 local function forceReconnect()
-    Fluent:Notify({
-        Title = "⚡ Force Reconnect",
-        Content = "Переподключение...",
-        Duration = 3
-    })
+    Fluent:Notify({Title = "⚡ Force Reconnect", Content = "Переподключение...", Duration = 3})
     pcall(function()
         for i = 1, 3 do
             local ok = pcall(function()
@@ -690,11 +639,7 @@ local function forceReconnect()
 end
 
 local function rejoinGame()
-    Fluent:Notify({
-        Title = "🎮 Rejoin Game",
-        Content = "Переподключение...",
-        Duration = 3
-    })
+    Fluent:Notify({Title = "🎮 Rejoin Game", Content = "Переподключение...", Duration = 3})
     pcall(function()
         TeleportService:Teleport(game.PlaceId, LocalPlayer)
     end)
@@ -719,6 +664,12 @@ local Tabs = {
     Server = Window:AddTab({ Title = "Server 🌐", Icon = "globe" }),
     ["UI Settings"] = Window:AddTab({ Title = "UI Settings", Icon = "palette" })
 }
+
+-- ⭐ АВТООТКРЫТИЕ ВКЛАДКИ SERVER ПРИ ЗАГРУЗКЕ
+task.wait(0.1)
+pcall(function()
+    Window:SelectTab(4) -- 1=Aimbot, 2=Visual, 3=Config, 4=Server, 5=UI Settings
+end)
 
 local Options = Fluent.Options
 
@@ -907,65 +858,49 @@ VisualSection:AddToggle("XRay", {
     Title = "X-Ray",
     Description = "Видеть сквозь стены",
     Default = false
-}):OnChanged(function(Value)
-    setXRay(Value)
-end)
+}):OnChanged(function(Value) setXRay(Value) end)
 
 VisualSection:AddToggle("FullBright", {
     Title = "Full Bright",
     Description = "Полное освещение",
     Default = false
-}):OnChanged(function(Value)
-    setFullBright(Value)
-end)
+}):OnChanged(function(Value) setFullBright(Value) end)
 
 VisualSection:AddToggle("NightVision", {
     Title = "Night Vision",
     Description = "Ночное видение",
     Default = false
-}):OnChanged(function(Value)
-    setNightVision(Value)
-end)
+}):OnChanged(function(Value) setNightVision(Value) end)
 
 VisualSection:AddToggle("NoShadows", {
     Title = "No Shadows",
     Description = "Убрать тени",
     Default = false
-}):OnChanged(function(Value)
-    setNoShadows(Value)
-end)
+}):OnChanged(function(Value) setNoShadows(Value) end)
 
 VisualSection:AddToggle("NoBloom", {
     Title = "No Bloom",
     Description = "Убрать свечение",
     Default = false
-}):OnChanged(function(Value)
-    setNoBloom(Value)
-end)
+}):OnChanged(function(Value) setNoBloom(Value) end)
 
 VisualSection:AddToggle("NoSunRays", {
     Title = "No Sun Rays",
     Description = "Убрать солнечные лучи",
     Default = false
-}):OnChanged(function(Value)
-    setNoSunRays(Value)
-end)
+}):OnChanged(function(Value) setNoSunRays(Value) end)
 
 VisualSection:AddToggle("RainbowLighting", {
     Title = "Rainbow Lighting",
     Description = "Радужное освещение",
     Default = false
-}):OnChanged(function(Value)
-    setRainbowLighting(Value)
-end)
+}):OnChanged(function(Value) setRainbowLighting(Value) end)
 
 VisualSection:AddToggle("NoFog", {
     Title = "No Fog",
     Description = "Убрать туман",
     Default = false
-}):OnChanged(function(Value)
-    setNoFog(Value)
-end)
+}):OnChanged(function(Value) setNoFog(Value) end)
 
 VisualSection:AddButton({
     Title = "🔄 Reset Visual Effects",
@@ -979,11 +914,7 @@ VisualSection:AddButton({
         setNoSunRays(false)
         setRainbowLighting(false)
         setNoFog(false)
-        Fluent:Notify({
-            Title = "🔄 Reset",
-            Content = "Эффекты сброшены",
-            Duration = 2
-        })
+        Fluent:Notify({Title = "🔄 Reset", Content = "Эффекты сброшены", Duration = 2})
     end
 })
 
@@ -1049,9 +980,7 @@ ConfigSection:AddDropdown("ConfigSelect", {
     Values = configList,
     Default = 1,
     Multi = false
-}):OnChanged(function(Value)
-    -- Просто сохраняем выбор
-end)
+}):OnChanged(function(Value) end)
 
 ConfigSection:AddButton({
     Title = "🔄 Обновить список",
@@ -1059,14 +988,8 @@ ConfigSection:AddButton({
     Callback = function()
         local list = getConfigList()
         local dropdown = Options.ConfigSelect
-        if dropdown then
-            dropdown:SetValues(list)
-        end
-        Fluent:Notify({
-            Title = "🔄 Список обновлён",
-            Content = "Найдено: " .. tostring(#list),
-            Duration = 2
-        })
+        if dropdown then dropdown:SetValues(list) end
+        Fluent:Notify({Title = "🔄 Список обновлён", Content = "Найдено: " .. tostring(#list), Duration = 2})
     end
 })
 
@@ -1083,9 +1006,7 @@ ConfigSection:AddButton({
             task.wait(0.3)
             local list = getConfigList()
             local dropdown = Options.ConfigSelect
-            if dropdown then
-                dropdown:SetValues(list)
-            end
+            if dropdown then dropdown:SetValues(list) end
         end
     end
 })
@@ -1095,11 +1016,8 @@ ConfigSection:AddButton({
     Description = "Загрузить выбранный конфиг",
     Callback = function()
         local dropdown = Options.ConfigSelect
-        if dropdown then
-            local sel = dropdown.Value
-            if sel then
-                loadConfig(sel)
-            end
+        if dropdown and dropdown.Value then
+            loadConfig(dropdown.Value)
         end
     end
 })
@@ -1109,7 +1027,7 @@ ConfigSection:AddButton({
     Description = "Удалить выбранный конфиг",
     Callback = function()
         local dropdown = Options.ConfigSelect
-        if dropdown then
+        if dropdown and dropdown.Value then
             local sel = dropdown.Value
             if sel and sel ~= "Нет конфигов" then
                 if deleteConfig(sel) then
@@ -1118,11 +1036,7 @@ ConfigSection:AddButton({
                     dropdown:SetValues(list)
                 end
             else
-                Fluent:Notify({
-                    Title = "❌ Ошибка",
-                    Content = "Нечего удалять",
-                    Duration = 2
-                })
+                Fluent:Notify({Title = "❌ Ошибка", Content = "Нечего удалять", Duration = 2})
             end
         end
     end
@@ -1132,11 +1046,7 @@ ConfigSection:AddButton({
     Title = "📁 Где хранятся конфиги?",
     Description = "Показать путь к папке",
     Callback = function()
-        Fluent:Notify({
-            Title = "📁 Папка конфигов",
-            Content = "workspace/" .. CONFIGS_FOLDER,
-            Duration = 6
-        })
+        Fluent:Notify({Title = "📁 Папка конфигов", Content = "workspace/" .. CONFIGS_FOLDER, Duration = 6})
         print("📁 Конфиги: workspace/" .. CONFIGS_FOLDER)
     end
 })
@@ -1152,9 +1062,7 @@ AutoExecSection:AddToggle("AutoLoadToggle", {
 }):OnChanged(function(Value)
     local dropdown = Options.ConfigSelect
     local currentConfig = ""
-    if dropdown and dropdown.Value then
-        currentConfig = dropdown.Value
-    end
+    if dropdown and dropdown.Value then currentConfig = dropdown.Value end
     saveAutoExec(currentConfig, Value)
     Fluent:Notify({
         Title = Value and "✅ Включено" or "❌ Выключено",
@@ -1174,17 +1082,9 @@ AutoExecSection:AddButton({
                 local toggle = Options.AutoLoadToggle
                 local toggleVal = toggle and toggle.Value or false
                 saveAutoExec(sel, toggleVal)
-                Fluent:Notify({
-                    Title = "📌 Установлено",
-                    Content = sel .. " будет загружаться при старте",
-                    Duration = 3
-                })
+                Fluent:Notify({Title = "📌 Установлено", Content = sel .. " будет загружаться при старте", Duration = 3})
             else
-                Fluent:Notify({
-                    Title = "❌ Ошибка",
-                    Content = "Выберите конфиг",
-                    Duration = 2
-                })
+                Fluent:Notify({Title = "❌ Ошибка", Content = "Выберите конфиг", Duration = 2})
             end
         end
     end
@@ -1197,36 +1097,46 @@ local ServerSection = Tabs.Server:AddSection("Server Actions")
 ServerSection:AddButton({
     Title = "🔄 Server Hop",
     Description = "Перейти на случайный сервер",
-    Callback = function()
-        serverHop()
-    end
+    Callback = function() serverHop() end
 })
 
 ServerSection:AddButton({
     Title = "🔁 Rejoin Server",
     Description = "Переподключиться к текущему серверу",
-    Callback = function()
-        rejoinServer()
-    end
+    Callback = function() rejoinServer() end
 })
 
 ServerSection:AddButton({
     Title = "⚡ Force Reconnect",
     Description = "Принудительное переподключение",
-    Callback = function()
-        forceReconnect()
-    end
+    Callback = function() forceReconnect() end
 })
 
 ServerSection:AddButton({
     Title = "🎮 Rejoin Game",
     Description = "Переподключиться к игре",
-    Callback = function()
-        rejoinGame()
-    end
+    Callback = function() rejoinGame() end
 })
 
 local InfoSection = Tabs.Server:AddSection("Server Info")
+
+-- ⭐ ПИНГ (обновляется автоматически через GetNetworkPing)
+local pingLabel = InfoSection:AddLabel("📶 Пинг: Загрузка...")
+
+task.spawn(function()
+    while task.wait(0.5) do
+        local ping = getPlayerPing()
+        local color = "🟢"
+        if ping > 100 then color = "🟡" end
+        if ping > 200 then color = "🔴" end
+        
+        if pingLabel then
+            pcall(function()
+                pingLabel:SetText(string.format("%s Пинг: %d ms", color, ping))
+            end)
+        end
+    end
+end)
 
 InfoSection:AddButton({
     Title = "📋 Информация о сервере",
@@ -1234,7 +1144,10 @@ InfoSection:AddButton({
     Callback = function()
         Fluent:Notify({
             Title = "📊 Сервер",
-            Content = "Place ID: " .. game.PlaceId .. "\nJob ID: " .. string.sub(game.JobId, 1, 20) .. "...\nИгроков: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers,
+            Content = "Place ID: " .. game.PlaceId .. 
+                      "\nJob ID: " .. string.sub(game.JobId, 1, 20) .. "..." ..
+                      "\nИгроков: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers ..
+                      "\nПинг: " .. getPlayerPing() .. " ms",
             Duration = 8
         })
     end
@@ -1245,11 +1158,7 @@ InfoSection:AddButton({
     Description = "Скопировать ID сервера",
     Callback = function()
         setclipboard(game.JobId)
-        Fluent:Notify({
-            Title = "✅ Скопировано",
-            Content = "Job ID в буфере обмена",
-            Duration = 2
-        })
+        Fluent:Notify({Title = "✅ Скопировано", Content = "Job ID в буфере обмена", Duration = 2})
     end
 })
 
@@ -1265,11 +1174,7 @@ InfoSection:AddButton({
         local text = #list > 0 and table.concat(list, ", ") or "Нет игроков"
         if #text > 200 then text = string.sub(text, 1, 200) .. "..." end
         
-        Fluent:Notify({
-            Title = "👥 Игроки (" .. #list .. ")",
-            Content = text,
-            Duration = 8
-        })
+        Fluent:Notify({Title = "👥 Игроки (" .. #list .. ")", Content = text, Duration = 8})
     end
 })
 
@@ -1385,7 +1290,7 @@ if autoExecData and autoExecData.autoLoad and autoExecData.lastConfig and autoEx
     end
 end
 
--- SaveManager и InterfaceManager (опционально)
+-- SaveManager и InterfaceManager
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
@@ -1401,6 +1306,7 @@ SaveManager:LoadAutoloadConfig()
 print("====================================")
 print("✅ Universal Aimbot (Fluent) загружен!")
 print("📁 Конфиги: workspace/" .. CONFIGS_FOLDER)
+print("📶 Пинг через Player:GetNetworkPing()")
 print("📌 RightControl - скрыть меню")
 print("📌 \\ - активация аимбота")
 print("====================================")
