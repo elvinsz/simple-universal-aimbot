@@ -1,6 +1,6 @@
 --[[
-    Universal Shindo Cheat v5.0
-    Исправлены: Silent Aim (из virus-кода), Colors, CHI/STAM
+    Universal Shindo Cheat v6.1
+    Исправлено: Silent Aim Hold с назначаемой клавишей, Colors, CHI/STAM
 ]]
 
 if getgenv().UniversalShindoLoaded then return end
@@ -42,16 +42,19 @@ local settings = {
     rainbowLighting = false, noFog = false
 }
 
--- Silent Aim (как в вирусе)
+-- Silent Aim
 local silentAim = {
     Enabled = false,
+    MasterEnabled = false,
+    Mode = "Hold",
+    HoldKey = Enum.KeyCode.E,
+    ListeningForBind = false,
     Prediction = 0.187,
     FOV = 500,
     TargetPart = "HumanoidRootPart",
     CachedTarget = nil,
     CachedCFrame = nil,
-    Bind = nil,
-    Mode = "Toggle"
+    Logging = false
 }
 
 -- ESP
@@ -71,7 +74,9 @@ local esp = {
 -- Colors
 local colors = {
     RainbowSkin = false, RainbowHair = false,
-    SkinSpeed = 0.5, HairSpeed = 0.5
+    SkinSpeed = 0.5, HairSpeed = 0.5,
+    Invert = true,
+    Clamp = true
 }
 local skinTimer, hairTimer = 0, 0
 
@@ -119,133 +124,74 @@ local function getServerRegion()
     return ok and region and tostring(region) or "Unknown"
 end
 
---> [< CHI/STAM — ПОИСК ПО ВСЕМ ПУТЯМ >] <--
+--> [< CHI/STAM >] <--
 
--- ✅ ИСПРАВЛЕНО: ищем везде где могут быть значения
 local function getPlayerChiStam(player)
-    local chi, stam, maxChi, maxStam = 0, 0, 0, 0
-
-    -- Путь 1: player.statz
-    pcall(function()
-        local statz = player:FindFirstChild("statz")
-        if statz then
-            for _, name in ipairs({"chakra", "chi", "Chakra", "Chi", "curchi", "curchakra"}) do
-                local v = statz:FindFirstChild(name)
-                if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
-                    chi = math.floor(v.Value)
-                    break
-                end
+    local chi, stam = 0, 0
+    
+    local statz = player:FindFirstChild("statz")
+    if statz then
+        local chiObj = statz:FindFirstChild("chakra") 
+            or statz:FindFirstChild("chi")
+            or statz:FindFirstChild("curchakra")
+        
+        if chiObj and (chiObj:IsA("NumberValue") or chiObj:IsA("IntValue")) then
+            chi = math.floor(chiObj.Value)
+        end
+        
+        local stamObj = statz:FindFirstChild("stamina")
+            or statz:FindFirstChild("stam")
+            or statz:FindFirstChild("curstamina")
+        
+        if stamObj and (stamObj:IsA("NumberValue") or stamObj:IsA("IntValue")) then
+            stam = math.floor(stamObj.Value)
+        end
+    end
+    
+    if chi == 0 and stam == 0 then
+        local char = player.Character
+        if char then
+            local chiObj = char:FindFirstChild("chakra") or char:FindFirstChild("chi")
+            if chiObj and (chiObj:IsA("NumberValue") or chiObj:IsA("IntValue")) then
+                chi = math.floor(chiObj.Value)
             end
-            for _, name in ipairs({"stamina", "stam", "Stamina", "Stam", "curstam"}) do
-                local v = statz:FindFirstChild(name)
-                if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
-                    stam = math.floor(v.Value)
-                    break
-                end
-            end
-            for _, name in ipairs({"maxchakra", "maxchi", "maxChakra", "maxChi"}) do
-                local v = statz:FindFirstChild(name)
-                if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
-                    maxChi = math.floor(v.Value)
-                    break
-                end
-            end
-            for _, name in ipairs({"maxstamina", "maxstam", "maxStamina"}) do
-                local v = statz:FindFirstChild(name)
-                if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
-                    maxStam = math.floor(v.Value)
-                    break
-                end
+            local stamObj = char:FindFirstChild("stamina") or char:FindFirstChild("stam")
+            if stamObj and (stamObj:IsA("NumberValue") or stamObj:IsA("IntValue")) then
+                stam = math.floor(stamObj.Value)
             end
         end
-    end)
-
-    -- Путь 2: player (напрямую)
-    if chi == 0 then
-        pcall(function()
-            for _, name in ipairs({"chakra", "chi", "Chakra", "Chi"}) do
-                local v = player:FindFirstChild(name)
-                if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
-                    chi = math.floor(v.Value)
-                    break
-                end
-            end
-            for _, name in ipairs({"stamina", "stam"}) do
-                local v = player:FindFirstChild(name)
-                if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
-                    stam = math.floor(v.Value)
-                    break
-                end
-            end
-        end)
     end
-
-    -- Путь 3: character
-    if chi == 0 then
-        pcall(function()
-            local char = player.Character
-            if char then
-                for _, name in ipairs({"chakra", "chi", "Chi", "Chakra"}) do
-                    local v = char:FindFirstChild(name)
-                    if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
-                        chi = math.floor(v.Value)
-                        break
-                    end
-                end
-                for _, name in ipairs({"stamina", "stam", "Stamina"}) do
-                    local v = char:FindFirstChild(name)
-                    if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
-                        stam = math.floor(v.Value)
-                        break
-                    end
-                end
-            end
-        end)
-    end
-
-    -- Путь 4: leaderstats
-    if chi == 0 then
-        pcall(function()
-            local ls = player:FindFirstChild("leaderstats")
-            if ls then
-                for _, name in ipairs({"chakra", "chi"}) do
-                    local v = ls:FindFirstChild(name)
-                    if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
-                        chi = math.floor(v.Value)
-                        break
-                    end
-                end
-                for _, name in ipairs({"stamina", "stam"}) do
-                    local v = ls:FindFirstChild(name)
-                    if v and (v:IsA("NumberValue") or v:IsA("IntValue")) then
-                        stam = math.floor(v.Value)
-                        break
-                    end
-                end
-            end
-        end)
-    end
-
-    return chi, stam, maxChi, maxStam
+    
+    return chi, stam
 end
 
--- Debug функция - ищет все NumberValue/IntValue в player
 local function debugScanPlayer()
-    print("===== SCAN PLAYER =====")
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p == LocalPlayer then
-            print("Player: " .. p.Name)
-            for _, obj in ipairs(p:GetDescendants()) do
-                if obj:IsA("NumberValue") or obj:IsA("IntValue") or obj:IsA("StringValue") then
-                    local val = tostring(obj.Value)
-                    if #val < 20 then
-                        print("  [" .. obj:GetFullName() .. "] = " .. val)
-                    end
+    print("===== SCAN LOCAL PLAYER =====")
+    local statz = LocalPlayer:FindFirstChild("statz")
+    if statz then
+        print("--- statz ---")
+        for _, obj in ipairs(statz:GetDescendants()) do
+            if obj:IsA("NumberValue") or obj:IsA("IntValue") then
+                print(string.format("  [%s] = %s", obj:GetFullName(), tostring(obj.Value)))
+            end
+        end
+    else
+        print("❌ statz не найден!")
+    end
+    
+    local char = LocalPlayer.Character
+    if char then
+        print("--- character ---")
+        for _, obj in ipairs(char:GetDescendants()) do
+            if obj:IsA("NumberValue") or obj:IsA("IntValue") then
+                local val = tostring(obj.Value)
+                if #val < 15 then
+                    print(string.format("  [%s] = %s", obj:GetFullName(), val))
                 end
             end
         end
     end
-    print("=======================")
+    print("=============================")
 end
 
 --> [< ВИЗУАЛЬНЫЕ ФУНКЦИИ >] <--
@@ -301,10 +247,7 @@ local function setNightVision(v)
     end)
 end
 
-local function setNoShadows(v)
-    settings.noShadows = v
-    Lighting.GlobalShadows = not v
-end
+local function setNoShadows(v) settings.noShadows = v; Lighting.GlobalShadows = not v end
 
 local function setNoBloom(v)
     settings.noBloom = v
@@ -343,20 +286,24 @@ local function setNoFog(v)
     end
 end
 
---> [< SILENT AIM — ТОЧНАЯ КОПИЯ ИЗ ВИРУСА >] <--
+--> [< SILENT AIM >] <--
 
 local silentHook = false
 local oldNamecall = nil
 local metaT = nil
-local silentCachedTarget = nil
-local silentCachedCFrame = nil
 
--- ✅ Копия из вируса
 RunService.Heartbeat:Connect(function()
-    silentCachedTarget = nil
-    silentCachedCFrame = nil
-    if not silentAim.Enabled then return end
-
+    if silentAim.MasterEnabled and silentAim.Mode == "Hold" then
+        local pressed = UserInputService:IsKeyDown(silentAim.HoldKey)
+        silentAim.Enabled = pressed
+    end
+    
+    if not silentAim.Enabled then
+        silentAim.CachedTarget = nil
+        silentAim.CachedCFrame = nil
+        return
+    end
+    
     local best = nil
     local dist = silentAim.FOV
     local cam = Workspace.CurrentCamera
@@ -381,13 +328,11 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
-    silentCachedTarget = best
-
-    if silentCachedTarget and silentCachedTarget.Parent then
-        local targetPos = silentCachedTarget.Position + (silentCachedTarget.Velocity * silentAim.Prediction)
+    silentAim.CachedTarget = best
+    if silentAim.CachedTarget and silentAim.CachedTarget.Parent then
+        local targetPos = silentAim.CachedTarget.Position + (silentAim.CachedTarget.Velocity * silentAim.Prediction)
         local camPos = cam.CFrame.Position
-        -- ✅ ТОЧНО как в вирусе
-        silentCachedCFrame = CFrame.new(targetPos, targetPos + (targetPos - camPos).Unit)
+        silentAim.CachedCFrame = CFrame.new(targetPos, targetPos + (targetPos - camPos).Unit)
     end
 end)
 
@@ -400,9 +345,15 @@ local function enableSilentHook()
         metaT.__namecall = newcclosure(function(self, ...)
             local method = getnamecallmethod()
             local args = {...}
+            
+            if silentAim.Logging and method == "FireServer" and self.Name == "update" then
+                print("[SILENT-LOG] update: args[1]=" .. tostring(args[1]) .. 
+                      " args[2]=" .. (typeof(args[2]) == "CFrame" and "CFrame" or tostring(args[2])))
+            end
+            
             if method == "FireServer" and self.Name == "update" then
-                if args[1] == "fixmouse" and silentAim.Enabled and silentCachedCFrame then
-                    args[2] = silentCachedCFrame
+                if args[1] == "fixmouse" and silentAim.Enabled and silentAim.CachedCFrame then
+                    args[2] = silentAim.CachedCFrame
                     return oldNamecall(self, table.unpack(args))
                 end
             end
@@ -410,7 +361,7 @@ local function enableSilentHook()
         end)
         setreadonly(metaT, true)
         silentHook = true
-        print("✅ Silent Aim хук установлен (virus-copy)")
+        print("✅ Silent Aim хук установлен")
     end)
     if not ok then warn("❌ Silent Aim: " .. tostring(err)) end
 end
@@ -505,7 +456,6 @@ local function updateESP()
         obj.hp.TextSize = esp.TextSize
         obj.hp.Text = string.format("HP: %d/%d", math.floor(hum.Health), math.floor(hum.MaxHealth))
         
-        -- ✅ CHI/STAM через новый поиск
         local chi, stam = getPlayerChiStam(player)
         obj.chi.Visible = esp.ShowChi
         obj.chi.TextColor3 = esp.ChiColor
@@ -527,15 +477,27 @@ local function updateESP()
     end
 end
 
---> [< COLOR CHANGER — ИСПРАВЛЕНО >] <--
+--> [< COLOR CHANGER >] <--
 
--- ✅ ИСПРАВЛЕНО: 
--- 1. НЕ инвертируем (вирус инвертировал, но у нас получилось black)
--- 2. Ждём прогрузки Head/UpperTorso
--- 3. Добавлен retry
+local function prepareColor(r, g, b)
+    r = math.clamp(math.floor(r), 1, 254)
+    g = math.clamp(math.floor(g), 1, 254)
+    b = math.clamp(math.floor(b), 1, 254)
+    
+    if colors.Invert then
+        r = 255 - r
+        g = 255 - g
+        b = 255 - b
+    end
+    
+    return string.format("%d,%d,%d", r, g, b)
+end
 
 local function setSkinColor(r, g, b)
-    if not shindoEvent then return end
+    if not shindoEvent then
+        Fluent:Notify({Title = "❌", Content = "startevent не найден", Duration = 3})
+        return
+    end
     task.spawn(function()
         local char = LocalPlayer.Character
         if char then
@@ -544,10 +506,9 @@ local function setSkinColor(r, g, b)
         end
         task.wait(0.3)
         
-        -- ✅ БЕЗ инверсии
-        local str = string.format("%d,%d,%d", r, g, b)
+        local str = prepareColor(r, g, b)
+        print("[COLOR] Skin: " .. str .. " (in=" .. tostring(colors.Invert) .. ")")
         
-        -- Retry 3 раза
         for i = 1, 3 do
             local ok = pcall(function()
                 shindoEvent:FireServer("skin", str)
@@ -568,7 +529,8 @@ local function setHairColor(r, g, b)
         end
         task.wait(0.3)
         
-        local str = string.format("%d,%d,%d", r, g, b)
+        local str = prepareColor(r, g, b)
+        print("[COLOR] Hair: " .. str)
         
         for i = 1, 3 do
             local ok = pcall(function()
@@ -669,7 +631,7 @@ end
 --> [< SERVER >] <--
 
 local function serverHop()
-    Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск сервера...", Duration = 3})
+    Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск...", Duration = 3})
     pcall(function()
         local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
         local servers = HttpService:JSONDecode(game:HttpGet(url))
@@ -681,8 +643,6 @@ local function serverHop()
         end
         if #avail > 0 then
             TeleportService:TeleportToPlaceInstance(game.PlaceId, avail[math.random(1, #avail)], LocalPlayer)
-        else
-            Fluent:Notify({Title = "❌", Content = "Нет серверов", Duration = 3})
         end
     end)
 end
@@ -692,16 +652,11 @@ local function rejoinServer()
     pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
 end
 
-local function rejoinGame()
-    Fluent:Notify({Title = "🎮 Rejoin", Content = "Переподключение...", Duration = 3})
-    pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
-end
-
 --> [< GUI >] <--
 
 local Window = Fluent:CreateWindow({
-    Title = "Universal Shindo v5.0",
-    SubTitle = "Aimbot • Silent Aim (virus) • ESP • Colors",
+    Title = "Universal Shindo v6.1",
+    SubTitle = "Silent Aim Bind • Colors • CHI/STAM",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 500),
     Acrylic = true,
@@ -732,19 +687,9 @@ end)
 Tabs.Aimbot:AddButton({Title = "👁️ Hide Menu", Callback = function() Window:Toggle() end})
 Tabs.Aimbot:AddButton({Title = "🔴 Close Script", Callback = function() closeScript() end})
 
-Tabs.Aimbot:AddDropdown("ActKey", {Title = "Activation Key",
-    Values = {"BackSlash (\\)", "LeftControl", "RightControl", "F", "Q", "E"},
-    Default = 1}):OnChanged(function(v)
-    if v == "BackSlash (\\)" then settings.key = "BackSlash" else settings.key = v end
-end)
-
 Tabs.Aimbot:AddDropdown("AimPart", {Title = "Aim Part",
     Values = {"Auto", "Head", "HumanoidRootPart", "UpperTorso", "Torso"},
     Default = 1}):OnChanged(function(v) settings.aimPart = v end)
-
-Tabs.Aimbot:AddToggle("ToggleMode", {Title = "Toggle Mode", Default = false}):OnChanged(function(v)
-    settings.aimMode = v and "Toggle" or "Hold"
-end)
 
 Tabs.Aimbot:AddSlider("FOV", {Title = "FOV Size", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(v)
     settings.fov = v; if fovCircle then fovCircle.Radius = v end
@@ -759,38 +704,76 @@ Tabs.Aimbot:AddSlider("Pred", {Title = "Prediction", Default = 6, Min = 0, Max =
 end)
 
 Tabs.Aimbot:AddToggle("WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.wallCheck = v end)
-Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.teamCheck = v end)
 
 --> [< SILENT AIM TAB >] <--
 
 Tabs.Silent:AddParagraph({
-    Title = "🎭 Silent Aim (virus-copy)",
-    Content = "Точная копия хука из virus-кода. Хук FireServer(update, fixmouse)."
+    Title = "🎭 Silent Aim",
+    Content = "Назначьте клавишу и удерживайте её для активации (Hold) или переключения (Toggle)."
 })
 
-Tabs.Silent:AddToggle("SilentOn", {Title = "Enable Silent Aim", Default = false}):OnChanged(function(v)
-    silentAim.Enabled = v
+Tabs.Silent:AddToggle("SilentMaster", {
+    Title = "Enable Silent Aim",
+    Description = "Главный выключатель",
+    Default = false
+}):OnChanged(function(v)
+    silentAim.MasterEnabled = v
     if v then enableSilentHook() else disableSilentHook() end
-    Fluent:Notify({Title = v and "🎭 Silent Aim ВКЛ" or "🎭 ВЫКЛ", Content = v and "Хук активен" or "Хук снят", Duration = 2})
+    Fluent:Notify({
+        Title = v and "🎭 Silent Aim ВКЛ" or "🎭 Silent Aim ВЫКЛ",
+        Content = v and ("Режим: " .. silentAim.Mode) or "Хук снят",
+        Duration = 2
+    })
 end)
+
+Tabs.Silent:AddDropdown("SilentMode", {
+    Title = "Режим",
+    Values = {"Hold", "Toggle"},
+    Default = 1
+}):OnChanged(function(v)
+    silentAim.Mode = v
+    Fluent:Notify({Title = "🎭 Режим: " .. v, Content = "Silent Aim режим изменён", Duration = 2})
+end)
+
+-- ✅ КНОПКА НАЗНАЧЕНИЯ КЛАВИШИ
+local silentBindButton
+silentBindButton = Tabs.Silent:AddButton({
+    Title = "🎹 BIND: E",
+    Description = "Нажмите, потом нажмите любую клавишу",
+    Callback = function()
+        silentAim.ListeningForBind = true
+        pcall(function()
+            silentBindButton:SetTitle("🎹 Нажмите клавишу...")
+        end)
+        Fluent:Notify({
+            Title = "🎹 Назначение клавиши",
+            Content = "Нажмите любую клавишу...",
+            Duration = 3
+        })
+    end
+})
 
 Tabs.Silent:AddDropdown("SilentPart", {Title = "Target Part",
     Values = {"HumanoidRootPart", "Head", "UpperTorso", "Torso"},
     Default = 1}):OnChanged(function(v) silentAim.TargetPart = v end)
 
-Tabs.Silent:AddSlider("SilentPred2", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v)
+Tabs.Silent:AddSlider("SilentPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v)
     silentAim.Prediction = v / 100
 end)
 
-Tabs.Silent:AddSlider("SilentFOV2", {Title = "FOV Radius", Default = 500, Min = 50, Max = 2000, Rounding = 0}):OnChanged(function(v)
+Tabs.Silent:AddSlider("SilentFOV", {Title = "FOV Radius", Default = 500, Min = 50, Max = 2000, Rounding = 0}):OnChanged(function(v)
     silentAim.FOV = v
+end)
+
+Tabs.Silent:AddToggle("SilentLog", {Title = "Log FireServer (debug)", Default = false}):OnChanged(function(v)
+    silentAim.Logging = v
 end)
 
 Tabs.Silent:AddButton({
     Title = "🔄 Переустановить хук",
     Callback = function()
         disableSilentHook(); task.wait(0.3)
-        if silentAim.Enabled then enableSilentHook() end
+        if silentAim.MasterEnabled then enableSilentHook() end
         Fluent:Notify({Title = "🔄", Content = "Хук переустановлен", Duration = 2})
     end
 })
@@ -816,11 +799,11 @@ Tabs.ESP:AddToggle("EspDist", {Title = "Show Distance", Default = true}):OnChang
 Tabs.ESP:AddSlider("EspSize", {Title = "Text Size", Default = 14, Min = 8, Max = 24, Rounding = 0}):OnChanged(function(v) esp.TextSize = v end)
 
 Tabs.ESP:AddButton({
-    Title = "🔍 Скан значений (debug)",
-    Description = "Найдёт все Value объекты игрока в консоли (F9)",
+    Title = "🔍 Скан моих значений (debug)",
+    Description = "Покажет все Value объекты в консоли (F9)",
     Callback = function()
         debugScanPlayer()
-        Fluent:Notify({Title = "🔍", Content = "Результат в консоли (F9)", Duration = 4})
+        Fluent:Notify({Title = "🔍", Content = "Смотри F9 в консоли", Duration = 4})
     end
 })
 
@@ -828,24 +811,27 @@ Tabs.ESP:AddButton({
 
 Tabs.Colors:AddParagraph({
     Title = "🎨 Colors",
-    Content = "Формат отправки: 'R,G,B' (не инвертирован). Retry x3 при ошибке."
+    Content = "Формат: clamp(1-254) + опциональная инверсия (как в вирусе)."
 })
 
-Tabs.Colors:AddToggle("RainbowSkin", {Title = "Rainbow Skin", Default = false}):OnChanged(function(v)
-    colors.RainbowSkin = v
+Tabs.Colors:AddToggle("InvertColors", {
+    Title = "Инвертировать цвет",
+    Description = "Как в оригинальном вирусе",
+    Default = true
+}):OnChanged(function(v)
+    colors.Invert = v
+    Fluent:Notify({Title = "🎨", Content = "Инверсия: " .. (v and "ВКЛ" or "ВЫКЛ"), Duration = 2})
 end)
 
-Tabs.Colors:AddToggle("RainbowHair", {Title = "Rainbow Hair", Default = false}):OnChanged(function(v)
-    colors.RainbowHair = v
-end)
+Tabs.Colors:AddToggle("ClampColors", {
+    Title = "Ограничить 1-254",
+    Default = true
+}):OnChanged(function(v) colors.Clamp = v end)
 
-Tabs.Colors:AddSlider("SkinSpd", {Title = "Skin Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v)
-    colors.SkinSpeed = v / 10
-end)
-
-Tabs.Colors:AddSlider("HairSpd", {Title = "Hair Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v)
-    colors.HairSpeed = v / 10
-end)
+Tabs.Colors:AddToggle("RainbowSkin", {Title = "Rainbow Skin", Default = false}):OnChanged(function(v) colors.RainbowSkin = v end)
+Tabs.Colors:AddToggle("RainbowHair", {Title = "Rainbow Hair", Default = false}):OnChanged(function(v) colors.RainbowHair = v end)
+Tabs.Colors:AddSlider("SkinSpd", {Title = "Skin Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v) colors.SkinSpeed = v / 10 end)
+Tabs.Colors:AddSlider("HairSpd", {Title = "Hair Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v) colors.HairSpeed = v / 10 end)
 
 local colorPresets = {
     {name = "🔴 Красный", r = 255, g = 0, b = 0},
@@ -853,8 +839,8 @@ local colorPresets = {
     {name = "🔵 Синий", r = 0, g = 0, b = 255},
     {name = "🟣 Фиолетовый", r = 128, g = 0, b = 255},
     {name = "🟡 Жёлтый", r = 255, g = 255, b = 0},
-    {name = "⚫ Чёрный", r = 0, g = 0, b = 0},
-    {name = "⚪ Белый", r = 255, g = 255, b = 255},
+    {name = "⚫ Чёрный", r = 1, g = 1, b = 1},
+    {name = "⚪ Белый", r = 254, g = 254, b = 254},
     {name = "🟠 Оранжевый", r = 255, g = 128, b = 0},
     {name = "💗 Розовый", r = 255, g = 105, b = 180},
     {name = "🩵 Cyan", r = 0, g = 255, b = 255}
@@ -862,23 +848,44 @@ local colorPresets = {
 
 for _, preset in ipairs(colorPresets) do
     Tabs.Colors:AddButton({
-        Title = preset.name .. " скин",
+        Title = preset.name .. " СКИН",
         Callback = function()
             setSkinColor(preset.r, preset.g, preset.b)
-            Fluent:Notify({Title = "🎨", Content = "Скин: " .. preset.name, Duration = 2})
+            Fluent:Notify({Title = "🎨 Скин", Content = preset.name, Duration = 2})
         end
     })
 end
 
-Tabs.Colors:AddColorpicker("CustomC", {Title = "Кастомный цвет скина", Default = Color3.fromRGB(255, 0, 0)})
-
+Tabs.Colors:AddColorpicker("CustomSkin", {Title = "Кастомный цвет скина", Default = Color3.fromRGB(255, 0, 0)})
 Tabs.Colors:AddButton({
-    Title = "✅ Применить кастомный",
+    Title = "✅ Применить кастомный скин",
     Callback = function()
-        local c = Options.CustomC.Value
+        local c = Options.CustomSkin.Value
         if c then
             setSkinColor(math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
-            Fluent:Notify({Title = "🎨", Content = "Применено", Duration = 2})
+            Fluent:Notify({Title = "🎨", Content = "Скин применён", Duration = 2})
+        end
+    end
+})
+
+for _, preset in ipairs(colorPresets) do
+    Tabs.Colors:AddButton({
+        Title = preset.name .. " ВОЛОСЫ",
+        Callback = function()
+            setHairColor(preset.r, preset.g, preset.b)
+            Fluent:Notify({Title = "🎨 Волосы", Content = preset.name, Duration = 2})
+        end
+    })
+end
+
+Tabs.Colors:AddColorpicker("CustomHair", {Title = "Кастомный цвет волос", Default = Color3.fromRGB(255, 0, 0)})
+Tabs.Colors:AddButton({
+    Title = "✅ Применить кастомные волосы",
+    Callback = function()
+        local c = Options.CustomHair.Value
+        if c then
+            setHairColor(math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
+            Fluent:Notify({Title = "🎨", Content = "Волосы применены", Duration = 2})
         end
     end
 })
@@ -894,20 +901,10 @@ Tabs.Visual:AddToggle("NoSR", {Title = "No Sun Rays", Default = false}):OnChange
 Tabs.Visual:AddToggle("RainL", {Title = "Rainbow Lighting", Default = false}):OnChanged(function(v) setRainbowLighting(v) end)
 Tabs.Visual:AddToggle("NoFog", {Title = "No Fog", Default = false}):OnChanged(function(v) setNoFog(v) end)
 
-Tabs.Visual:AddButton({
-    Title = "🔄 Reset Visual",
-    Callback = function()
-        setXRay(false); setFullBright(false); setNightVision(false)
-        setNoShadows(false); setNoBloom(false); setNoSunRays(false)
-        setRainbowLighting(false); setNoFog(false)
-    end
-})
-
 --> [< SERVER TAB >] <--
 
 Tabs.Server:AddButton({Title = "🔄 Server Hop", Callback = function() serverHop() end})
 Tabs.Server:AddButton({Title = "🔁 Rejoin Server", Callback = function() rejoinServer() end})
-Tabs.Server:AddButton({Title = "🎮 Rejoin Game", Callback = function() rejoinGame() end})
 
 local pingPara = Tabs.Server:AddParagraph({Title = "📶 Пинг", Content = "..."})
 local regPara = Tabs.Server:AddParagraph({Title = "🌍 Регион", Content = "..."})
@@ -931,7 +928,41 @@ end)
 --> [< ГЛАВНЫЙ ЦИКЛ >] <--
 
 UserInputService.InputBegan:Connect(function(input, gp)
-    if gp or not aimbotEnabled then return end
+    if gp then return end
+    
+    -- ✅ ОБРАБОТКА НАЗНАЧЕНИЯ КЛАВИШИ
+    if silentAim.ListeningForBind then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            silentAim.HoldKey = input.KeyCode
+            silentAim.ListeningForBind = false
+            
+            pcall(function()
+                silentBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name)
+            end)
+            
+            Fluent:Notify({
+                Title = "✅ Клавиша назначена",
+                Content = "Silent Aim активируется на: " .. input.KeyCode.Name,
+                Duration = 3
+            })
+        end
+        return
+    end
+    
+    -- Обработка Toggle режима Silent Aim
+    if silentAim.MasterEnabled and silentAim.Mode == "Toggle" then
+        if input.KeyCode == silentAim.HoldKey then
+            silentAim.Enabled = not silentAim.Enabled
+            Fluent:Notify({
+                Title = silentAim.Enabled and "🎭 Silent Aim АКТИВЕН" or "🎭 Silent Aim ВЫКЛ",
+                Content = "Toggle",
+                Duration = 1
+            })
+        end
+    end
+    
+    -- Aimbot
+    if not aimbotEnabled then return end
     local k = settings.key == "BackSlash" and Enum.KeyCode.BackSlash or Enum[settings.key]
     if k and input.KeyCode == k then
         if settings.aimMode == "Hold" then aiming = true
@@ -995,10 +1026,8 @@ RunService.Heartbeat:Connect(function(dt)
             skinTimer = 0
             local h = (tick() * colors.SkinSpeed) % 1
             local c = Color3.fromHSV(h, 1, 1)
-            pcall(function()
-                shindoEvent:FireServer("skin", string.format("%d,%d,%d",
-                    math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255)))
-            end)
+            local str = prepareColor(c.R*255, c.G*255, c.B*255)
+            pcall(function() shindoEvent:FireServer("skin", str) end)
         end
     end
     
@@ -1008,10 +1037,8 @@ RunService.Heartbeat:Connect(function(dt)
             hairTimer = 0
             local h = (tick() * colors.HairSpeed) % 1
             local c = Color3.fromHSV(h, 1, 1)
-            pcall(function()
-                shindoEvent:FireServer("haircolor", string.format("%d,%d,%d",
-                    math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255)))
-            end)
+            local str = prepareColor(c.R*255, c.G*255, c.B*255)
+            pcall(function() shindoEvent:FireServer("haircolor", str) end)
         end
     end
 end)
@@ -1039,7 +1066,7 @@ end)
 
 --> [< UI SETTINGS >] <--
 
-local saveOk, saveErr = pcall(function()
+pcall(function()
     SaveManager:SetLibrary(Fluent)
     InterfaceManager:SetLibrary(Fluent)
     SaveManager:IgnoreThemeSettings()
@@ -1051,17 +1078,10 @@ local saveOk, saveErr = pcall(function()
     SaveManager:LoadAutoloadConfig()
 end)
 
-if not saveOk then
-    Tabs.UI:AddParagraph({
-        Title = "⚠️ SaveManager",
-        Content = "Ошибка: " .. tostring(saveErr):sub(1, 100)
-    })
-end
-
 print("====================================")
-print("✅ Universal Shindo v5.0 загружен!")
-print("🎭 Silent Aim: virus-copy")
-print("🎨 Colors: НЕ инвертирован + retry")
-print("👁️ ESP: CHI/STAM по всем путям")
+print("✅ Universal Shindo v6.1 загружен!")
+print("🎭 Silent Aim: назначаемая клавиша через кнопку BIND")
+print("🎨 Colors: clamp(1-254) + инверсия")
+print("👁️ ESP: CHI/STAM")
 print("📌 RightControl - скрыть меню")
 print("====================================")
