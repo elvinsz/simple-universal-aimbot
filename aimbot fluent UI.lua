@@ -1,6 +1,6 @@
 --[[
-    Universal Shindo Cheat v8.0
-    Исправлено: 360° через WorldToViewportPoint без onScreen, MaxDistance, CHI/STAM
+    Universal Shindo Cheat v8.1
+    Добавлено: ServerHop 2 (с fallback на реджойн)
 ]]
 
 if getgenv().UniversalShindoLoaded then return end
@@ -104,13 +104,11 @@ local lastTargetUpdate = 0
 local hue, lightingHue = 0, 0
 local rainbowSpeed = 0.005
 
--- ✅ R6/R15 части тела — Torso в приоритете
 local R6_PARTS = {"Torso", "Head", "HumanoidRootPart"}
 local R15_PARTS = {"UpperTorso", "Head", "HumanoidRootPart", "LowerTorso"}
 
 local function getAllBodyParts(char)
     if not char then return {} end
-    -- Проверяем на R6 (есть Torso)
     local parts = {}
     if char:FindFirstChild("Torso") then
         for _, n in ipairs(R6_PARTS) do
@@ -126,7 +124,6 @@ local function getAllBodyParts(char)
     return parts
 end
 
--- FOV круги
 local fovCircle
 pcall(function()
     fovCircle = Drawing.new("Circle")
@@ -163,7 +160,7 @@ local function getServerRegion()
     return ok and region and tostring(region) or "Unknown"
 end
 
---> [< CHI/STAM — ФИНАЛЬНЫЙ ПОИСК >] <--
+--> [< CHI/STAM >] <--
 
 local function tryReadValue(obj)
     if not obj then return nil end
@@ -175,7 +172,6 @@ end
 local function searchInRoot(root, keywords, exclude)
     if not root then return nil end
     
-    -- 1. Attributes
     local attrResult = nil
     pcall(function()
         for _, attr in ipairs(root:GetAttributes()) do
@@ -202,7 +198,6 @@ local function searchInRoot(root, keywords, exclude)
     end)
     if attrResult then return attrResult end
     
-    -- 2. Value objects
     local best, bestScore = nil, -1
     for _, obj in ipairs(root:GetDescendants()) do
         if obj:IsA("NumberValue") or obj:IsA("IntValue") then
@@ -395,9 +390,8 @@ local function setNoFog(v)
     end
 end
 
---> [< ✅ ФИНАЛЬНЫЙ ПОИСК ЦЕЛИ (с 360 поддержкой) >] <--
+--> [< ПОИСК ЦЕЛИ >] <--
 
--- ✅ Ищет в радиусе R от игрока, БЕЗ проверки onScreen
 local function findClosestEnemyInWorld(maxDist, prioritizeClose, onlyPart)
     local char = LocalPlayer.Character
     if not char then return nil end
@@ -412,7 +406,6 @@ local function findClosestEnemyInWorld(maxDist, prioritizeClose, onlyPart)
     for _, player in ipairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
         
-        -- Team check
         if settings.teamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then
             continue
         end
@@ -423,21 +416,17 @@ local function findClosestEnemyInWorld(maxDist, prioritizeClose, onlyPart)
         local enemyHum = enemyChar:FindFirstChildOfClass("Humanoid")
         if not enemyHum or enemyHum.Health <= 0 then continue end
         
-        -- Ищем нужную часть тела
         local targetPart = nil
         if onlyPart then
             targetPart = enemyChar:FindFirstChild(onlyPart)
         else
             local parts = getAllBodyParts(enemyChar)
-            for _, p in ipairs(parts) do
-                if not targetPart then targetPart = p end
-            end
+            if #parts > 0 then targetPart = parts[1] end
         end
         if not targetPart then continue end
         
         local dist = (targetPart.Position - origin).Magnitude
         
-        -- ✅ Max distance check
         if maxDist and maxDist > 0 and dist > maxDist then
             continue
         end
@@ -451,7 +440,6 @@ local function findClosestEnemyInWorld(maxDist, prioritizeClose, onlyPart)
     return bestTarget
 end
 
--- ✅ Для FOV режима — поиск по экрану
 local function findClosestEnemyInFOV(fovRadius, maxDist)
     local char = LocalPlayer.Character
     if not char then return nil end
@@ -517,10 +505,8 @@ RunService.Heartbeat:Connect(function()
         return
     end
     
-    -- ✅ Ищем цель через общий метод
     local best
     if silentAim.Mode360 then
-        -- 360 mode: без onScreen, только мировая дистанция
         best = findClosestEnemyInWorld(silentAim.MaxDistance, silentAim.PrioritizeClose, silentAim.TargetPart)
     else
         best = findClosestEnemyInFOV(silentAim.FOV, silentAim.MaxDistance)
@@ -747,13 +733,10 @@ local function isVisible(char)
     return not res or res.Instance:IsDescendantOf(char)
 end
 
--- ✅ ФИНАЛЬНЫЙ ПОИСК ЦЕЛИ для Aimbot
 local function getTarget()
     if settings.mode360 then
-        -- 360 mode: чистый поиск по дистанции без onScreen
         return findClosestEnemyInWorld(settings.maxDistance, settings.prioritizeClose, nil)
     else
-        -- FOV mode
         local char = LocalPlayer.Character
         if not char then return nil end
         local myRoot = char:FindFirstChild("HumanoidRootPart")
@@ -825,6 +808,8 @@ local function serverHop()
         end
         if #avail > 0 then
             TeleportService:TeleportToPlaceInstance(game.PlaceId, avail[math.random(1, #avail)], LocalPlayer)
+        else
+            Fluent:Notify({Title = "❌", Content = "Нет других серверов", Duration = 3})
         end
     end)
 end
@@ -834,11 +819,68 @@ local function rejoinServer()
     pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
 end
 
+-- ✅ SERVER HOP 2 — приоритет другой сервер, fallback = реджойн текущего
+local function serverHop2()
+    Fluent:Notify({
+        Title = "🔄 Server Hop 2",
+        Content = "Поиск другого сервера...",
+        Duration = 3
+    })
+    
+    task.spawn(function()
+        local success = pcall(function()
+            local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+            local response = game:HttpGet(url)
+            local servers = HttpService:JSONDecode(response)
+            
+            local currentJobId = game.JobId
+            local available = {}
+            
+            for _, s in ipairs(servers.data) do
+                if s.playing < s.maxPlayers and s.id ~= currentJobId then
+                    table.insert(available, s.id)
+                end
+            end
+            
+            if #available > 0 then
+                local targetServer = available[math.random(1, #available)]
+                print("[HOP2] Найден другой сервер: " .. targetServer)
+                Fluent:Notify({
+                    Title = "✅ Найден сервер",
+                    Content = "Переход на другой сервер...",
+                    Duration = 3
+                })
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, targetServer, LocalPlayer)
+            else
+                print("[HOP2] Других серверов нет, реджойн текущего")
+                Fluent:Notify({
+                    Title = "🔁 Нет других серверов",
+                    Content = "Реджойн текущего сервера...",
+                    Duration = 3
+                })
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, currentJobId, LocalPlayer)
+            end
+        end)
+        
+        if not success then
+            print("[HOP2] Ошибка получения списка, реджойн")
+            Fluent:Notify({
+                Title = "⚠️ Ошибка API",
+                Content = "Реджойн текущего сервера...",
+                Duration = 3
+            })
+            pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+            end)
+        end
+    end)
+end
+
 --> [< GUI >] <--
 
 local Window = Fluent:CreateWindow({
-    Title = "Universal Shindo v8.0",
-    SubTitle = "360° Fix • MaxDistance • CHI/STAM",
+    Title = "Universal Shindo v8.1",
+    SubTitle = "360° • ServerHop2 • CHI/STAM",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 500),
     Acrylic = true,
@@ -910,7 +952,7 @@ Tabs.Aimbot:AddSlider("FOV", {Title = "FOV Size", Default = 300, Min = 0, Max = 
     settings.fov = v; if fovCircle then fovCircle.Radius = v end
 end)
 
-Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance", Description = "0 = без ограничений (вся карта)", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v)
+Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance", Description = "0 = без ограничений", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v)
     settings.maxDistance = v
 end)
 
@@ -918,14 +960,9 @@ Tabs.Aimbot:AddToggle("PriorClose", {Title = "Prioritize Close Targets", Default
     settings.prioritizeClose = v
 end)
 
-Tabs.Aimbot:AddToggle("Mode360", {Title = "360° Mode", Description = "Игнорирует FOV и экран, ищет ближайшего по дистанции", Default = false}):OnChanged(function(v)
+Tabs.Aimbot:AddToggle("Mode360", {Title = "360° Mode", Description = "Игнорирует FOV", Default = false}):OnChanged(function(v)
     settings.mode360 = v
     if v and fovCircle then fovCircle.Visible = false end
-    Fluent:Notify({
-        Title = v and "🎯 360° ВКЛ" or "🎯 FOV режим",
-        Content = v and "Поиск по всей карте" or "Поиск в FOV",
-        Duration = 2
-    })
 end)
 
 Tabs.Aimbot:AddSlider("Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v)
@@ -1109,8 +1146,23 @@ Tabs.Visual:AddToggle("NoFog", {Title = "No Fog", Default = false}):OnChanged(fu
 
 --> [< SERVER TAB >] <--
 
-Tabs.Server:AddButton({Title = "🔄 Server Hop", Callback = function() serverHop() end})
-Tabs.Server:AddButton({Title = "🔁 Rejoin Server", Callback = function() rejoinServer() end})
+Tabs.Server:AddButton({
+    Title = "🔄 Server Hop",
+    Description = "Переход на случайный другой сервер",
+    Callback = function() serverHop() end
+})
+
+Tabs.Server:AddButton({
+    Title = "🔄 Server Hop 2",
+    Description = "Приоритет другого сервера, иначе — реджойн текущего",
+    Callback = function() serverHop2() end
+})
+
+Tabs.Server:AddButton({
+    Title = "🔁 Rejoin Server",
+    Description = "Переподключение к текущему серверу",
+    Callback = function() rejoinServer() end
+})
 
 local pingPara = Tabs.Server:AddParagraph({Title = "📶 Пинг", Content = "..."})
 local regPara = Tabs.Server:AddParagraph({Title = "🌍 Регион", Content = "..."})
@@ -1188,7 +1240,6 @@ RunService.RenderStepped:Connect(function()
         Lighting.OutdoorAmbient = c
     end
     
-    -- Aimbot FOV circle
     if aimbotEnabled and fovCircle and settings.showFovCircle and not settings.mode360 then
         fovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
         fovCircle.Visible = true
@@ -1204,7 +1255,6 @@ RunService.RenderStepped:Connect(function()
         fovCircle.Visible = false
     end
     
-    -- Silent FOV circle
     if silentAim.MasterEnabled and silentFovCircle and silentAim.ShowFovCircle and not silentAim.Mode360 then
         silentFovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
         silentFovCircle.Radius = silentAim.FOV
@@ -1214,16 +1264,13 @@ RunService.RenderStepped:Connect(function()
         silentFovCircle.Visible = false
     end
     
-    -- Aimbot main loop
     if aiming then
         local t = tick()
         if t - lastTargetUpdate > 0.05 then
             lastTargetUpdate = t
             currentTarget = getTarget()
         end
-        if currentTarget then 
-            aimAtTargetPart(currentTarget) 
-        end
+        if currentTarget then aimAtTargetPart(currentTarget) end
     else
         currentTarget = nil
     end
@@ -1297,9 +1344,10 @@ pcall(function()
 end)
 
 print("====================================")
-print("✅ Universal Shindo v8.0 загружен!")
-print("🎯 360°: чистый поиск по дистанции (как XP AIMBOT)")
+print("✅ Universal Shindo v8.1 загружен!")
+print("🔄 ServerHop 2: другой сервер или реджойн")
+print("🎯 360°: чистый поиск по дистанции")
 print("📏 MaxDistance: 0 = вся карта")
-print("🔍 CHI/STAM: Attributes + PlayerGui + рекурсия")
+print("🔍 CHI/STAM: Attributes + PlayerGui")
 print("📌 RightControl - скрыть меню")
 print("====================================")
