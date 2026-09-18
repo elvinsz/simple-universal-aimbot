@@ -1,17 +1,15 @@
 --[[
-    Universal Aimbot v2.0 (Fluent UI)
+    Universal Aimbot v2.2 (Fluent UI)
     GitHub: https://github.com/elvinsz/simple-universal-aimbot
-    Описание: Универсальный аимбот с визуальными эффектами, системой конфигов и server hop
 ]]
 
--- Проверка на повторную загрузку
 if getgenv().UniversalAimbotLoaded then
     print("⚠️ Universal Aimbot уже загружен!")
     return
 end
 getgenv().UniversalAimbotLoaded = true
 
--- Загрузка Fluent UI
+-- Загрузка Fluent UI + Addons
 print("🔄 Загрузка Fluent UI...")
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
@@ -22,7 +20,6 @@ if not Fluent then
     getgenv().UniversalAimbotLoaded = false
     return
 end
-
 print("✅ Fluent UI загружен!")
 
 -- Сервисы
@@ -30,38 +27,17 @@ local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
 local Lighting = game:GetService("Lighting")
 local TeleportService = game:GetService("TeleportService")
-local TweenService = game:GetService("TweenService")
+local LocalizationService = game:GetService("LocalizationService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
---> [< ПАПКИ КОНФИГОВ >] <--
-
-local CONFIG_FOLDER = "UniversalAimbot"
-local CONFIGS_FOLDER = "UniversalAimbot/Configs"
-local AUTOEXEC_FILE = "UniversalAimbot/autoexec.json"
-
-local function ensureFolders()
-    pcall(function()
-        if not isfolder(CONFIG_FOLDER) then
-            makefolder(CONFIG_FOLDER)
-        end
-        if not isfolder(CONFIGS_FOLDER) then
-            makefolder(CONFIGS_FOLDER)
-        end
-    end)
-end
-
-ensureFolders()
-
 --> [< НАСТРОЙКИ >] <--
 
 local settings = {
-    -- Aimbot
     fov = 300,
     smoothing = 0.15,
     prediction = 0.065,
@@ -79,8 +55,6 @@ local settings = {
     rainbowFov = false,
     fovColor = Color3.fromRGB(255, 0, 0),
     targetedColor = Color3.fromRGB(0, 255, 0),
-    
-    -- Visual
     xray = false,
     fullBright = false,
     nightVision = false,
@@ -91,7 +65,6 @@ local settings = {
     noFog = false
 }
 
--- Оригинальные значения Lighting
 local originalLighting = {
     Ambient = Lighting.Ambient,
     OutdoorAmbient = Lighting.OutdoorAmbient,
@@ -102,7 +75,6 @@ local originalLighting = {
     GlobalShadows = Lighting.GlobalShadows
 }
 
--- Переменные
 local aimbotEnabled = false
 local aiming = false
 local currentTarget = nil
@@ -120,7 +92,6 @@ local hue = 0
 local rainbowSpeed = 0.005
 local lightingHue = 0
 
--- FOV круг
 local fovCircle
 pcall(function()
     fovCircle = Drawing.new("Circle")
@@ -131,6 +102,35 @@ pcall(function()
     fovCircle.Transparency = 1
     fovCircle.Visible = false
 end)
+
+--> [< ПИНГ И РЕГИОН СЕРВЕРА >] <--
+
+local function getPlayerPing()
+    local success, ping = pcall(function()
+        return LocalPlayer:GetNetworkPing()
+    end)
+    if success and ping then
+        return math.floor(ping * 1000)
+    end
+    return 0
+end
+
+-- Получение региона СЕРВЕРА через первого игрока (хост сервера)
+local function getServerRegion()
+    local success, region = pcall(function()
+        -- Первый игрок в списке обычно создатель сервера
+        -- Roblox создает сервер рядом с ним => его регион ≈ регион сервера
+        local firstPlayer = Players:GetPlayers()[1]
+        if not firstPlayer then
+            firstPlayer = LocalPlayer
+        end
+        return LocalizationService:GetCountryRegionForPlayerAsync(firstPlayer)
+    end)
+    if success and region then
+        return tostring(region)
+    end
+    return "Unknown"
+end
 
 --> [< ВИЗУАЛЬНЫЕ ФУНКЦИИ >] <--
 
@@ -199,9 +199,7 @@ local function setNoBloom(enabled)
     settings.noBloom = enabled
     pcall(function()
         for _, effect in ipairs(Lighting:GetChildren()) do
-            if effect:IsA("BloomEffect") then
-                effect.Enabled = not enabled
-            end
+            if effect:IsA("BloomEffect") then effect.Enabled = not enabled end
         end
     end)
 end
@@ -210,9 +208,7 @@ local function setNoSunRays(enabled)
     settings.noSunRays = enabled
     pcall(function()
         for _, effect in ipairs(Lighting:GetChildren()) do
-            if effect:IsA("SunRaysEffect") then
-                effect.Enabled = not enabled
-            end
+            if effect:IsA("SunRaysEffect") then effect.Enabled = not enabled end
         end
     end)
 end
@@ -234,234 +230,6 @@ local function setNoFog(enabled)
         Lighting.FogEnd = originalLighting.FogEnd
         Lighting.FogStart = originalLighting.FogStart
     end
-end
-
---> [< СИСТЕМА КОНФИГОВ >] <--
-
-local function collectSettings()
-    return {
-        fov = settings.fov,
-        smoothing = settings.smoothing,
-        prediction = settings.prediction,
-        wallCheck = settings.wallCheck,
-        stickyAim = settings.stickyAim,
-        teamCheck = settings.teamCheck,
-        healthCheck = settings.healthCheck,
-        minHealth = settings.minHealth,
-        aimPart = settings.aimPart,
-        aimMode = settings.aimMode,
-        key = settings.key,
-        showFovCircle = settings.showFovCircle,
-        maxDistance = settings.maxDistance,
-        prioritizeClose = settings.prioritizeClose,
-        rainbowFov = settings.rainbowFov,
-        fovColor = {R = settings.fovColor.R, G = settings.fovColor.G, B = settings.fovColor.B},
-        targetedColor = {R = settings.targetedColor.R, G = settings.targetedColor.G, B = settings.targetedColor.B},
-        xray = settings.xray,
-        fullBright = settings.fullBright,
-        nightVision = settings.nightVision,
-        noShadows = settings.noShadows,
-        noBloom = settings.noBloom,
-        noSunRays = settings.noSunRays,
-        rainbowLighting = settings.rainbowLighting,
-        noFog = settings.noFog
-    }
-end
-
-local function applySettings(data)
-    if not data then return false end
-    
-    settings.fov = data.fov or settings.fov
-    settings.smoothing = data.smoothing or settings.smoothing
-    settings.prediction = data.prediction or settings.prediction
-    settings.wallCheck = data.wallCheck ~= nil and data.wallCheck or settings.wallCheck
-    settings.stickyAim = data.stickyAim ~= nil and data.stickyAim or settings.stickyAim
-    settings.teamCheck = data.teamCheck ~= nil and data.teamCheck or settings.teamCheck
-    settings.healthCheck = data.healthCheck ~= nil and data.healthCheck or settings.healthCheck
-    settings.minHealth = data.minHealth or settings.minHealth
-    settings.aimPart = data.aimPart or settings.aimPart
-    settings.aimMode = data.aimMode or settings.aimMode
-    settings.key = data.key or settings.key
-    settings.showFovCircle = data.showFovCircle ~= nil and data.showFovCircle or settings.showFovCircle
-    settings.maxDistance = data.maxDistance or settings.maxDistance
-    settings.prioritizeClose = data.prioritizeClose ~= nil and data.prioritizeClose or settings.prioritizeClose
-    settings.rainbowFov = data.rainbowFov ~= nil and data.rainbowFov or settings.rainbowFov
-    
-    if data.fovColor then
-        settings.fovColor = Color3.new(data.fovColor.R, data.fovColor.G, data.fovColor.B)
-        if fovCircle and not settings.rainbowFov then
-            fovCircle.Color = settings.fovColor
-        end
-    end
-    
-    if data.targetedColor then
-        settings.targetedColor = Color3.new(data.targetedColor.R, data.targetedColor.G, data.targetedColor.B)
-    end
-    
-    if fovCircle then
-        fovCircle.Radius = settings.fov
-    end
-    
-    setXRay(data.xray or false)
-    setFullBright(data.fullBright or false)
-    setNightVision(data.nightVision or false)
-    setNoShadows(data.noShadows or false)
-    setNoBloom(data.noBloom or false)
-    setNoSunRays(data.noSunRays or false)
-    setRainbowLighting(data.rainbowLighting or false)
-    setNoFog(data.noFog or false)
-    
-    return true
-end
-
-local function saveConfig(name)
-    if not name or name == "" then
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = "Введите название конфига",
-            Duration = 3
-        })
-        return false
-    end
-    
-    name = tostring(name):gsub("[^%w_%-%. ]", "")
-    if name == "" then
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = "Недопустимое название",
-            Duration = 3
-        })
-        return false
-    end
-    
-    local success, result = pcall(function()
-        ensureFolders()
-        local data = collectSettings()
-        local json = HttpService:JSONEncode(data)
-        local path = CONFIGS_FOLDER .. "/" .. name .. ".json"
-        writefile(path, json)
-        return path
-    end)
-    
-    if success then
-        Fluent:Notify({
-            Title = "💾 Конфиг сохранён",
-            Content = name .. ".json",
-            Duration = 3
-        })
-        print("✅ Сохранён: " .. result)
-        return true
-    else
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = tostring(result),
-            Duration = 4
-        })
-        return false
-    end
-end
-
-local function loadConfig(name)
-    if not name or name == "" or name == "Нет конфигов" then
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = "Выберите конфиг",
-            Duration = 3
-        })
-        return false
-    end
-    
-    local success, result = pcall(function()
-        local path = CONFIGS_FOLDER .. "/" .. name .. ".json"
-        if not isfile(path) then
-            error("Файл не найден")
-        end
-        
-        local json = readfile(path)
-        local data = HttpService:JSONDecode(json)
-        applySettings(data)
-        return name
-    end)
-    
-    if success then
-        Fluent:Notify({
-            Title = "📂 Загружено",
-            Content = "Конфиг: " .. result,
-            Duration = 3
-        })
-        print("✅ Загружен: " .. result)
-        return true
-    else
-        Fluent:Notify({
-            Title = "❌ Ошибка",
-            Content = tostring(result),
-            Duration = 4
-        })
-        return false
-    end
-end
-
-local function deleteConfig(name)
-    if not name or name == "" or name == "Нет конфигов" then return false end
-    
-    local success = pcall(function()
-        local path = CONFIGS_FOLDER .. "/" .. name .. ".json"
-        if isfile(path) then
-            delfile(path)
-        end
-    end)
-    
-    if success then
-        Fluent:Notify({
-            Title = "🗑️ Удалён",
-            Content = name,
-            Duration = 2
-        })
-        return true
-    end
-    return false
-end
-
-local function getConfigList()
-    local configs = {}
-    pcall(function()
-        ensureFolders()
-        local files = listfiles(CONFIGS_FOLDER)
-        for _, file in ipairs(files) do
-            local name = file:match("([^/\\]+)%.json$")
-            if name and name ~= "" then
-                table.insert(configs, name)
-            end
-        end
-    end)
-    if #configs == 0 then
-        table.insert(configs, "Нет конфигов")
-    end
-    return configs
-end
-
---> [< AUTOEXEC >] <--
-
-local function saveAutoExec(configName, autoLoad)
-    pcall(function()
-        ensureFolders()
-        local data = {
-            lastConfig = configName or "",
-            autoLoad = autoLoad or false
-        }
-        writefile(AUTOEXEC_FILE, HttpService:JSONEncode(data))
-    end)
-end
-
-local function loadAutoExec()
-    local data = {lastConfig = "", autoLoad = false}
-    pcall(function()
-        if isfile(AUTOEXEC_FILE) then
-            local json = readfile(AUTOEXEC_FILE)
-            data = HttpService:JSONDecode(json)
-        end
-    end)
-    return data
 end
 
 --> [< ФУНКЦИИ АИМБОТА >] <--
@@ -631,15 +399,11 @@ end
 --> [< СЕРВЕР ФУНКЦИИ >] <--
 
 local function serverHop()
-    Fluent:Notify({
-        Title = "🔄 Server Hop",
-        Content = "Поиск сервера...",
-        Duration = 3
-    })
+    Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск сервера...", Duration = 3})
     pcall(function()
         local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
         local response = game:HttpGet(url)
-        local servers = HttpService:JSONDecode(response)
+        local servers = game:GetService("HttpService"):JSONDecode(response)
         local available = {}
         
         for _, s in ipairs(servers.data) do
@@ -651,32 +415,20 @@ local function serverHop()
         if #available > 0 then
             TeleportService:TeleportToPlaceInstance(game.PlaceId, available[math.random(1, #available)], LocalPlayer)
         else
-            Fluent:Notify({
-                Title = "❌ Ошибка",
-                Content = "Нет серверов",
-                Duration = 3
-            })
+            Fluent:Notify({Title = "❌ Ошибка", Content = "Нет серверов", Duration = 3})
         end
     end)
 end
 
 local function rejoinServer()
-    Fluent:Notify({
-        Title = "🔁 Rejoin",
-        Content = "Переподключение...",
-        Duration = 3
-    })
+    Fluent:Notify({Title = "🔁 Rejoin", Content = "Переподключение...", Duration = 3})
     pcall(function()
         TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
     end)
 end
 
 local function forceReconnect()
-    Fluent:Notify({
-        Title = "⚡ Force Reconnect",
-        Content = "Переподключение...",
-        Duration = 3
-    })
+    Fluent:Notify({Title = "⚡ Force Reconnect", Content = "Переподключение...", Duration = 3})
     pcall(function()
         for i = 1, 3 do
             local ok = pcall(function()
@@ -690,17 +442,13 @@ local function forceReconnect()
 end
 
 local function rejoinGame()
-    Fluent:Notify({
-        Title = "🎮 Rejoin Game",
-        Content = "Переподключение...",
-        Duration = 3
-    })
+    Fluent:Notify({Title = "🎮 Rejoin Game", Content = "Переподключение...", Duration = 3})
     pcall(function()
         TeleportService:Teleport(game.PlaceId, LocalPlayer)
     end)
 end
 
---> [< GUI (FLUENT) >] <--
+--> [< GUI >] <--
 
 local Window = Fluent:CreateWindow({
     Title = "Universal Aimbot",
@@ -715,7 +463,6 @@ local Window = Fluent:CreateWindow({
 local Tabs = {
     Aimbot = Window:AddTab({ Title = "Aimbot 🎯", Icon = "crosshair" }),
     Visual = Window:AddTab({ Title = "Visual 👁️", Icon = "eye" }),
-    Config = Window:AddTab({ Title = "Config ⚙️", Icon = "settings" }),
     Server = Window:AddTab({ Title = "Server 🌐", Icon = "globe" }),
     ["UI Settings"] = Window:AddTab({ Title = "UI Settings", Icon = "palette" })
 }
@@ -730,9 +477,7 @@ Tabs.Aimbot:AddToggle("AimbotEnabled", {
     Default = false
 }):OnChanged(function(Value)
     aimbotEnabled = Value
-    if fovCircle then
-        fovCircle.Visible = settings.showFovCircle and Value
-    end
+    if fovCircle then fovCircle.Visible = settings.showFovCircle and Value end
     if not Value then
         aiming = false
         currentTarget = nil
@@ -741,23 +486,16 @@ end)
 
 Tabs.Aimbot:AddButton({
     Title = "👁️ Hide Menu",
-    Description = "Скрыть/показать меню",
-    Callback = function()
-        Window:Toggle()
-    end
+    Callback = function() Window:Toggle() end
 })
 
 Tabs.Aimbot:AddButton({
     Title = "🔴 Close Script",
-    Description = "Закрыть скрипт",
-    Callback = function()
-        closeScript()
-    end
+    Callback = function() closeScript() end
 })
 
 Tabs.Aimbot:AddDropdown("ActivationKey", {
     Title = "Activation Key",
-    Description = "Клавиша активации аимбота",
     Values = {"BackSlash (\\)", "LeftControl", "RightControl", "LeftShift", "RightShift", "F", "Q", "E", "R", "T"},
     Default = 1,
     Multi = false
@@ -777,7 +515,6 @@ end)
 
 Tabs.Aimbot:AddDropdown("AimPart", {
     Title = "Aim Part",
-    Description = "Часть тела для прицеливания",
     Values = {
         "Auto (Best Available)", "Head", "HumanoidRootPart", "UpperTorso",
         "Torso", "LowerTorso", "LeftUpperArm", "RightUpperArm",
@@ -795,400 +532,55 @@ Tabs.Aimbot:AddDropdown("AimPart", {
     end
 end)
 
-Tabs.Aimbot:AddToggle("ToggleMode", {
-    Title = "Toggle Mode",
-    Description = "Режим переключения (вместо удержания)",
-    Default = false
-}):OnChanged(function(Value)
-    settings.aimMode = Value and "Toggle" or "Hold"
-end)
-
-Tabs.Aimbot:AddSlider("FOVSize", {
-    Title = "FOV Size",
-    Description = "Размер поля зрения",
-    Default = 300,
-    Min = 0,
-    Max = 800,
-    Rounding = 0
-}):OnChanged(function(Value)
-    settings.fov = Value
-    if fovCircle then fovCircle.Radius = Value end
-end)
-
-Tabs.Aimbot:AddSlider("MaxDistance", {
-    Title = "Max Distance",
-    Description = "Максимальная дистанция поиска цели",
-    Default = 5000,
-    Min = 0,
-    Max = 5000,
-    Rounding = 0
-}):OnChanged(function(Value)
-    settings.maxDistance = Value
-end)
-
-Tabs.Aimbot:AddToggle("PrioritizeClose", {
-    Title = "Prioritize Close Targets",
-    Description = "Приоритет ближних целей",
-    Default = true
-}):OnChanged(function(Value)
-    settings.prioritizeClose = Value
-end)
-
-Tabs.Aimbot:AddSlider("Smoothing", {
-    Title = "Smoothing",
-    Description = "Плавность прицеливания",
-    Default = 15,
-    Min = 0,
-    Max = 100,
-    Rounding = 0
-}):OnChanged(function(Value)
-    settings.smoothing = Value / 100
-end)
-
-Tabs.Aimbot:AddSlider("Prediction", {
-    Title = "Prediction",
-    Description = "Предсказание движения",
-    Default = 6,
-    Min = 0,
-    Max = 30,
-    Rounding = 0
-}):OnChanged(function(Value)
-    settings.prediction = Value / 100
-end)
-
-Tabs.Aimbot:AddToggle("WallCheck", {
-    Title = "Wall Check",
-    Description = "Проверка стен",
-    Default = false
-}):OnChanged(function(Value)
-    settings.wallCheck = Value
-end)
-
-Tabs.Aimbot:AddToggle("StickyAim", {
-    Title = "Sticky Aim",
-    Description = "Прилипание к цели",
-    Default = false
-}):OnChanged(function(Value)
-    settings.stickyAim = Value
-end)
-
-Tabs.Aimbot:AddToggle("TeamCheck", {
-    Title = "Team Check",
-    Description = "Проверка команды",
-    Default = false
-}):OnChanged(function(Value)
-    settings.teamCheck = Value
-end)
-
-Tabs.Aimbot:AddToggle("HealthCheck", {
-    Title = "Health Check",
-    Description = "Проверка здоровья",
-    Default = false
-}):OnChanged(function(Value)
-    settings.healthCheck = Value
-end)
-
-Tabs.Aimbot:AddSlider("MinHealth", {
-    Title = "Min Health",
-    Description = "Минимальное здоровье цели",
-    Default = 0,
-    Min = 0,
-    Max = 100,
-    Rounding = 0
-}):OnChanged(function(Value)
-    settings.minHealth = Value
-end)
+Tabs.Aimbot:AddToggle("ToggleMode", {Title = "Toggle Mode", Default = false}):OnChanged(function(Value) settings.aimMode = Value and "Toggle" or "Hold" end)
+Tabs.Aimbot:AddSlider("FOVSize", {Title = "FOV Size", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(Value) settings.fov = Value; if fovCircle then fovCircle.Radius = Value end end)
+Tabs.Aimbot:AddSlider("MaxDistance", {Title = "Max Distance", Default = 5000, Min = 0, Max = 5000, Rounding = 0}):OnChanged(function(Value) settings.maxDistance = Value end)
+Tabs.Aimbot:AddToggle("PrioritizeClose", {Title = "Prioritize Close Targets", Default = true}):OnChanged(function(Value) settings.prioritizeClose = Value end)
+Tabs.Aimbot:AddSlider("Smoothing", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(Value) settings.smoothing = Value / 100 end)
+Tabs.Aimbot:AddSlider("Prediction", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(Value) settings.prediction = Value / 100 end)
+Tabs.Aimbot:AddToggle("WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(Value) settings.wallCheck = Value end)
+Tabs.Aimbot:AddToggle("StickyAim", {Title = "Sticky Aim", Default = false}):OnChanged(function(Value) settings.stickyAim = Value end)
+Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(Value) settings.teamCheck = Value end)
+Tabs.Aimbot:AddToggle("HealthCheck", {Title = "Health Check", Default = false}):OnChanged(function(Value) settings.healthCheck = Value end)
+Tabs.Aimbot:AddSlider("MinHealth", {Title = "Min Health", Default = 0, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(Value) settings.minHealth = Value end)
 
 --> [< ВКЛАДКА VISUAL >] <--
 
 local VisualSection = Tabs.Visual:AddSection("World Visuals")
 
-VisualSection:AddToggle("XRay", {
-    Title = "X-Ray",
-    Description = "Видеть сквозь стены",
-    Default = false
-}):OnChanged(function(Value)
-    setXRay(Value)
-end)
-
-VisualSection:AddToggle("FullBright", {
-    Title = "Full Bright",
-    Description = "Полное освещение",
-    Default = false
-}):OnChanged(function(Value)
-    setFullBright(Value)
-end)
-
-VisualSection:AddToggle("NightVision", {
-    Title = "Night Vision",
-    Description = "Ночное видение",
-    Default = false
-}):OnChanged(function(Value)
-    setNightVision(Value)
-end)
-
-VisualSection:AddToggle("NoShadows", {
-    Title = "No Shadows",
-    Description = "Убрать тени",
-    Default = false
-}):OnChanged(function(Value)
-    setNoShadows(Value)
-end)
-
-VisualSection:AddToggle("NoBloom", {
-    Title = "No Bloom",
-    Description = "Убрать свечение",
-    Default = false
-}):OnChanged(function(Value)
-    setNoBloom(Value)
-end)
-
-VisualSection:AddToggle("NoSunRays", {
-    Title = "No Sun Rays",
-    Description = "Убрать солнечные лучи",
-    Default = false
-}):OnChanged(function(Value)
-    setNoSunRays(Value)
-end)
-
-VisualSection:AddToggle("RainbowLighting", {
-    Title = "Rainbow Lighting",
-    Description = "Радужное освещение",
-    Default = false
-}):OnChanged(function(Value)
-    setRainbowLighting(Value)
-end)
-
-VisualSection:AddToggle("NoFog", {
-    Title = "No Fog",
-    Description = "Убрать туман",
-    Default = false
-}):OnChanged(function(Value)
-    setNoFog(Value)
-end)
+VisualSection:AddToggle("XRay", {Title = "X-Ray", Default = false}):OnChanged(function(Value) setXRay(Value) end)
+VisualSection:AddToggle("FullBright", {Title = "Full Bright", Default = false}):OnChanged(function(Value) setFullBright(Value) end)
+VisualSection:AddToggle("NightVision", {Title = "Night Vision", Default = false}):OnChanged(function(Value) setNightVision(Value) end)
+VisualSection:AddToggle("NoShadows", {Title = "No Shadows", Default = false}):OnChanged(function(Value) setNoShadows(Value) end)
+VisualSection:AddToggle("NoBloom", {Title = "No Bloom", Default = false}):OnChanged(function(Value) setNoBloom(Value) end)
+VisualSection:AddToggle("NoSunRays", {Title = "No Sun Rays", Default = false}):OnChanged(function(Value) setNoSunRays(Value) end)
+VisualSection:AddToggle("RainbowLighting", {Title = "Rainbow Lighting", Default = false}):OnChanged(function(Value) setRainbowLighting(Value) end)
+VisualSection:AddToggle("NoFog", {Title = "No Fog", Default = false}):OnChanged(function(Value) setNoFog(Value) end)
 
 VisualSection:AddButton({
     Title = "🔄 Reset Visual Effects",
-    Description = "Сбросить все эффекты",
     Callback = function()
-        setXRay(false)
-        setFullBright(false)
-        setNightVision(false)
-        setNoShadows(false)
-        setNoBloom(false)
-        setNoSunRays(false)
-        setRainbowLighting(false)
-        setNoFog(false)
-        Fluent:Notify({
-            Title = "🔄 Reset",
-            Content = "Эффекты сброшены",
-            Duration = 2
-        })
+        setXRay(false); setFullBright(false); setNightVision(false)
+        setNoShadows(false); setNoBloom(false); setNoSunRays(false)
+        setRainbowLighting(false); setNoFog(false)
+        Fluent:Notify({Title = "🔄 Reset", Content = "Эффекты сброшены", Duration = 2})
     end
 })
 
 local FOVSection = Tabs.Visual:AddSection("FOV Circle")
 
-FOVSection:AddToggle("ShowFOVCircle", {
-    Title = "Show FOV Circle",
-    Description = "Показать круг FOV",
-    Default = true
-}):OnChanged(function(Value)
+FOVSection:AddToggle("ShowFOVCircle", {Title = "Show FOV Circle", Default = true}):OnChanged(function(Value)
     settings.showFovCircle = Value
     if fovCircle then fovCircle.Visible = Value and aimbotEnabled end
 end)
 
-FOVSection:AddColorpicker("FOVColor", {
-    Title = "FOV Color",
-    Description = "Цвет круга FOV",
-    Default = Color3.fromRGB(255, 0, 0)
-}):OnChanged(function(Color)
+FOVSection:AddColorpicker("FOVColor", {Title = "FOV Color", Default = Color3.fromRGB(255, 0, 0)}):OnChanged(function(Color)
     settings.fovColor = Color
     if fovCircle and not settings.rainbowFov then fovCircle.Color = Color end
 end)
 
-FOVSection:AddColorpicker("TargetedColor", {
-    Title = "Targeted Color",
-    Description = "Цвет при захвате цели",
-    Default = Color3.fromRGB(0, 255, 0)
-}):OnChanged(function(Color)
-    settings.targetedColor = Color
-end)
-
-FOVSection:AddToggle("RainbowFOV", {
-    Title = "Rainbow FOV",
-    Description = "Радужный круг FOV",
-    Default = false
-}):OnChanged(function(Value)
-    settings.rainbowFov = Value
-end)
-
---> [< ВКЛАДКА CONFIG >] <--
-
-local ConfigSection = Tabs.Config:AddSection("Configuration")
-
-local configNameValue = "my_config"
-
-ConfigSection:AddInput("ConfigName", {
-    Title = "Название конфига",
-    Description = "Введите название для сохранения",
-    Default = "my_config",
-    Placeholder = "my_config",
-    Numeric = false,
-    Finished = false,
-    Callback = function(Value)
-        configNameValue = Value
-    end
-})
-
-local configList = getConfigList()
-
-ConfigSection:AddDropdown("ConfigSelect", {
-    Title = "Выбрать конфиг",
-    Description = "Выберите сохранённый конфиг",
-    Values = configList,
-    Default = 1,
-    Multi = false
-}):OnChanged(function(Value)
-    -- Просто сохраняем выбор
-end)
-
-ConfigSection:AddButton({
-    Title = "🔄 Обновить список",
-    Description = "Обновить список конфигов",
-    Callback = function()
-        local list = getConfigList()
-        local dropdown = Options.ConfigSelect
-        if dropdown then
-            dropdown:SetValues(list)
-        end
-        Fluent:Notify({
-            Title = "🔄 Список обновлён",
-            Content = "Найдено: " .. tostring(#list),
-            Duration = 2
-        })
-    end
-})
-
-ConfigSection:AddButton({
-    Title = "💾 Сохранить конфиг",
-    Description = "Сохранить текущие настройки",
-    Callback = function()
-        local name = configNameValue
-        if not name or name == "" then
-            name = "config_" .. os.time()
-        end
-        
-        if saveConfig(name) then
-            task.wait(0.3)
-            local list = getConfigList()
-            local dropdown = Options.ConfigSelect
-            if dropdown then
-                dropdown:SetValues(list)
-            end
-        end
-    end
-})
-
-ConfigSection:AddButton({
-    Title = "📂 Загрузить выбранный",
-    Description = "Загрузить выбранный конфиг",
-    Callback = function()
-        local dropdown = Options.ConfigSelect
-        if dropdown then
-            local sel = dropdown.Value
-            if sel then
-                loadConfig(sel)
-            end
-        end
-    end
-})
-
-ConfigSection:AddButton({
-    Title = "🗑️ Удалить выбранный",
-    Description = "Удалить выбранный конфиг",
-    Callback = function()
-        local dropdown = Options.ConfigSelect
-        if dropdown then
-            local sel = dropdown.Value
-            if sel and sel ~= "Нет конфигов" then
-                if deleteConfig(sel) then
-                    task.wait(0.3)
-                    local list = getConfigList()
-                    dropdown:SetValues(list)
-                end
-            else
-                Fluent:Notify({
-                    Title = "❌ Ошибка",
-                    Content = "Нечего удалять",
-                    Duration = 2
-                })
-            end
-        end
-    end
-})
-
-ConfigSection:AddButton({
-    Title = "📁 Где хранятся конфиги?",
-    Description = "Показать путь к папке",
-    Callback = function()
-        Fluent:Notify({
-            Title = "📁 Папка конфигов",
-            Content = "workspace/" .. CONFIGS_FOLDER,
-            Duration = 6
-        })
-        print("📁 Конфиги: workspace/" .. CONFIGS_FOLDER)
-    end
-})
-
-local AutoExecSection = Tabs.Config:AddSection("Auto-Load")
-
-local autoExecData = loadAutoExec()
-
-AutoExecSection:AddToggle("AutoLoadToggle", {
-    Title = "🚀 Auto-Load при запуске",
-    Description = "Автоматически загружать конфиг при старте",
-    Default = autoExecData.autoLoad or false
-}):OnChanged(function(Value)
-    local dropdown = Options.ConfigSelect
-    local currentConfig = ""
-    if dropdown and dropdown.Value then
-        currentConfig = dropdown.Value
-    end
-    saveAutoExec(currentConfig, Value)
-    Fluent:Notify({
-        Title = Value and "✅ Включено" or "❌ Выключено",
-        Content = "Auto-Load: " .. tostring(Value),
-        Duration = 2
-    })
-end)
-
-AutoExecSection:AddButton({
-    Title = "📌 Сделать конфигом по умолчанию",
-    Description = "Установить выбранный конфиг как основной",
-    Callback = function()
-        local dropdown = Options.ConfigSelect
-        if dropdown and dropdown.Value then
-            local sel = dropdown.Value
-            if sel and sel ~= "Нет конфигов" then
-                local toggle = Options.AutoLoadToggle
-                local toggleVal = toggle and toggle.Value or false
-                saveAutoExec(sel, toggleVal)
-                Fluent:Notify({
-                    Title = "📌 Установлено",
-                    Content = sel .. " будет загружаться при старте",
-                    Duration = 3
-                })
-            else
-                Fluent:Notify({
-                    Title = "❌ Ошибка",
-                    Content = "Выберите конфиг",
-                    Duration = 2
-                })
-            end
-        end
-    end
-})
+FOVSection:AddColorpicker("TargetedColor", {Title = "Targeted Color", Default = Color3.fromRGB(0, 255, 0)}):OnChanged(function(Color) settings.targetedColor = Color end)
+FOVSection:AddToggle("RainbowFOV", {Title = "Rainbow FOV", Default = false}):OnChanged(function(Value) settings.rainbowFov = Value end)
 
 --> [< ВКЛАДКА SERVER >] <--
 
@@ -1197,44 +589,77 @@ local ServerSection = Tabs.Server:AddSection("Server Actions")
 ServerSection:AddButton({
     Title = "🔄 Server Hop",
     Description = "Перейти на случайный сервер",
-    Callback = function()
-        serverHop()
-    end
+    Callback = function() serverHop() end
 })
 
 ServerSection:AddButton({
     Title = "🔁 Rejoin Server",
     Description = "Переподключиться к текущему серверу",
-    Callback = function()
-        rejoinServer()
-    end
+    Callback = function() rejoinServer() end
 })
 
 ServerSection:AddButton({
     Title = "⚡ Force Reconnect",
     Description = "Принудительное переподключение",
-    Callback = function()
-        forceReconnect()
-    end
+    Callback = function() forceReconnect() end
 })
 
 ServerSection:AddButton({
     Title = "🎮 Rejoin Game",
     Description = "Переподключиться к игре",
-    Callback = function()
-        rejoinGame()
-    end
+    Callback = function() rejoinGame() end
 })
 
 local InfoSection = Tabs.Server:AddSection("Server Info")
 
+-- Пинг
+local pingParagraph = InfoSection:AddParagraph({
+    Title = "📶 Пинг",
+    Content = "Загрузка..."
+})
+
+-- Регион сервера
+local regionParagraph = InfoSection:AddParagraph({
+    Title = "🌍 Регион сервера",
+    Content = "Определение..."
+})
+
+-- Поток обновления пинга
+task.spawn(function()
+    task.wait(1)
+    while task.wait(0.5) do
+        local ping = getPlayerPing()
+        local color = "🟢"
+        if ping > 100 then color = "🟡" end
+        if ping > 200 then color = "🔴" end
+        
+        pcall(function()
+            pingParagraph:SetDesc(string.format("%s %d ms", color, ping))
+        end)
+    end
+end)
+
+-- Поток обновления региона
+task.spawn(function()
+    task.wait(2)
+    while task.wait(10) do
+        local region = getServerRegion()
+        pcall(function()
+            regionParagraph:SetDesc("🌍 " .. region)
+        end)
+    end
+end)
+
 InfoSection:AddButton({
     Title = "📋 Информация о сервере",
-    Description = "Показать данные сервера",
     Callback = function()
         Fluent:Notify({
             Title = "📊 Сервер",
-            Content = "Place ID: " .. game.PlaceId .. "\nJob ID: " .. string.sub(game.JobId, 1, 20) .. "...\nИгроков: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers,
+            Content = "Place ID: " .. game.PlaceId .. 
+                      "\nJob ID: " .. string.sub(game.JobId, 1, 20) .. "..." ..
+                      "\nИгроков: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers ..
+                      "\nПинг: " .. getPlayerPing() .. " ms" ..
+                      "\nРегион сервера: " .. getServerRegion(),
             Duration = 8
         })
     end
@@ -1242,20 +667,14 @@ InfoSection:AddButton({
 
 InfoSection:AddButton({
     Title = "📋 Скопировать Job ID",
-    Description = "Скопировать ID сервера",
     Callback = function()
         setclipboard(game.JobId)
-        Fluent:Notify({
-            Title = "✅ Скопировано",
-            Content = "Job ID в буфере обмена",
-            Duration = 2
-        })
+        Fluent:Notify({Title = "✅", Content = "Job ID скопирован", Duration = 2})
     end
 })
 
 InfoSection:AddButton({
     Title = "👥 Список игроков",
-    Description = "Показать всех игроков на сервере",
     Callback = function()
         local list = {}
         for _, p in ipairs(Players:GetPlayers()) do
@@ -1265,11 +684,7 @@ InfoSection:AddButton({
         local text = #list > 0 and table.concat(list, ", ") or "Нет игроков"
         if #text > 200 then text = string.sub(text, 1, 200) .. "..." end
         
-        Fluent:Notify({
-            Title = "👥 Игроки (" .. #list .. ")",
-            Content = text,
-            Duration = 8
-        })
+        Fluent:Notify({Title = "👥 Игроки (" .. #list .. ")", Content = text, Duration = 8})
     end
 })
 
@@ -1375,17 +790,8 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
---> [< АВТОЗАГРУЗКА >] <--
+--> [< UI SETTINGS (SaveManager + InterfaceManager) >] <--
 
-if autoExecData and autoExecData.autoLoad and autoExecData.lastConfig and autoExecData.lastConfig ~= "" then
-    task.wait(0.5)
-    local ok = loadConfig(autoExecData.lastConfig)
-    if ok then
-        print("🚀 Auto-Load: " .. autoExecData.lastConfig)
-    end
-end
-
--- SaveManager и InterfaceManager (опционально)
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
 SaveManager:IgnoreThemeSettings()
@@ -1398,9 +804,19 @@ SaveManager:BuildConfigSection(Tabs["UI Settings"])
 
 SaveManager:LoadAutoloadConfig()
 
+--> [< ОТКРЫТИЕ SERVER TAB ПРИ ЗАГРУЗКЕ >] <--
+
+task.spawn(function()
+    task.wait(1)
+    pcall(function()
+        Window:SelectTab(Tabs.Server)
+    end)
+end)
+
 print("====================================")
 print("✅ Universal Aimbot (Fluent) загружен!")
-print("📁 Конфиги: workspace/" .. CONFIGS_FOLDER)
+print("📁 Конфиги: workspace/UniversalAimbot/Configs")
+print("📶 Пинг через Player:GetNetworkPing()")
+print("🌍 Регион через первого игрока (хост сервера)")
 print("📌 RightControl - скрыть меню")
-print("📌 \\ - активация аимбота")
 print("====================================")
