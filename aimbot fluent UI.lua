@@ -1,7 +1,7 @@
 --[[
-    Universal Aimbot v3.0 (Fluent UI)
+    Universal Aimbot v3.1 (Fluent UI)
     GitHub: https://github.com/elvinsz/simple-universal-aimbot
-    Функции: Aimbot, Silent Aim, Visual Effects, ESP, Server Tools, Пинг, Регион
+    Функции: Aimbot, Silent Aim, Visual Effects, Server Tools, Пинг, Регион, Free Cursor
 ]]
 
 if getgenv().UniversalAimbotLoaded then
@@ -132,7 +132,6 @@ local function getPlayerPing()
     return 0
 end
 
--- Регион СЕРВЕРА через первого игрока (хост сервера)
 local function getServerRegion()
     local success, region = pcall(function()
         local firstPlayer = Players:GetPlayers()[1]
@@ -553,7 +552,6 @@ local function rejoinGame()
     end)
 end
 
--- Создать новый приватный сервер и зайти на него
 local function createAndJoinNewServer()
     Fluent:Notify({
         Title = "🔄 Создание сервера",
@@ -978,23 +976,38 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
---> [< СВОБОДНЫЙ КУРСОР ПРИ ОТКРЫТОМ МЕНЮ >] <--
+--> [< СВОБОДНЫЙ КУРСОР ПРИ ОТКРЫТОМ МЕНЮ (ИСПРАВЛЕНО) >] <--
 
 local originalMouseBehavior = UserInputService.MouseBehavior
 local originalMouseIcon = UserInputService.MouseIconEnabled
 local menuOpen = true
+local forceLocked = false
 
+-- Функция переключения
 local function setMenuState(state)
     menuOpen = state
+    
     if state then
+        -- Меню открыто → курсор свободен
+        forceLocked = false
         UserInputService.MouseBehavior = Enum.MouseBehavior.Default
         UserInputService.MouseIconEnabled = true
     else
+        -- Меню закрыто → возвращаем управление игре
+        forceLocked = true
+        
+        -- Ждём 2 кадра, чтобы игра сама восстановила поведение
+        task.wait()
+        task.wait()
+        
+        -- Возвращаем исходное поведение
         UserInputService.MouseBehavior = originalMouseBehavior
         UserInputService.MouseIconEnabled = originalMouseIcon
+        forceLocked = false
     end
 end
 
+-- RightControl — переключение меню
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == Enum.KeyCode.RightControl then
@@ -1002,8 +1015,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
+-- Отслеживание состояния GUI Fluent
 task.spawn(function()
     task.wait(1.5)
+    
     local fluentGui = CoreGui:FindFirstChild("Fluent")
     if not fluentGui then
         for _, gui in ipairs(CoreGui:GetChildren()) do
@@ -1025,13 +1040,25 @@ task.spawn(function()
     end
 end)
 
-RunService.RenderStepped:Connect(function()
+-- Постоянный контроль поведения мыши через BindToRenderStep с высоким приоритетом
+RunService:BindToRenderStep("MouseControl", Enum.RenderPriority.Camera.Value + 10, function()
     if menuOpen then
+        -- Меню открыто — форсим Default
         if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
             UserInputService.MouseBehavior = Enum.MouseBehavior.Default
         end
         if not UserInputService.MouseIconEnabled then
             UserInputService.MouseIconEnabled = true
+        end
+    else
+        -- Меню закрыто — форсим исходное поведение
+        if not forceLocked and originalMouseBehavior ~= Enum.MouseBehavior.Default then
+            if UserInputService.MouseBehavior ~= originalMouseBehavior then
+                UserInputService.MouseBehavior = originalMouseBehavior
+            end
+            if UserInputService.MouseIconEnabled ~= originalMouseIcon then
+                UserInputService.MouseIconEnabled = originalMouseIcon
+            end
         end
     end
 end)
@@ -1060,11 +1087,12 @@ task.spawn(function()
 end)
 
 print("====================================")
-print("✅ Universal Aimbot v3.0 загружен!")
+print("✅ Universal Aimbot v3.1 загружен!")
 print("📁 Конфиги: workspace/UniversalAimbot/Configs")
 print("📶 Пинг: Player:GetNetworkPing()")
 print("🌍 Регион: через первого игрока")
 print("🎭 Silent Aim: " .. (silentAimConnection and "работает" or "не активен"))
+print("🖱️  Свободный курсор: BindToRenderStep (исправлено)")
 print("📌 RightControl - скрыть/показать меню")
 print("📌 \\ - активация аимбота")
 print("====================================")
