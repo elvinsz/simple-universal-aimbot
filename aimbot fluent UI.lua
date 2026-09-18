@@ -1,6 +1,6 @@
 --[[
-    Universal Shindo Cheat v7.1
-    Исправлено: Bind (Enum), Aimbot/Silent (keys), CHI/STAM
+    Universal Shindo Cheat v8.2
+    Исправлено: MaxDistance (от персонажа), 360° Mode (без onScreen), CHI/STAM (Attributes), Force Reconnect
 ]]
 
 if getgenv().UniversalShindoLoaded then return end
@@ -31,7 +31,6 @@ pcall(function() shindoEvent = LocalPlayer:WaitForChild("startevent", 8) end)
 --> [< НАСТРОЙКИ >] <--
 
 local settings = {
-    -- Aimbot
     fov = 300,
     smoothing = 0.15,
     prediction = 0.065,
@@ -39,17 +38,16 @@ local settings = {
     teamCheck = false,
     aimPart = "Auto",
     aimMode = "Hold",
-    aimKey = Enum.KeyCode.BackSlash,   -- ✅ Enum, не строка
+    aimKey = Enum.KeyCode.BackSlash,
     ListeningForAimBind = false,
     showFovCircle = true,
-    maxDistance = 5000,
+    maxDistance = 0,
     prioritizeClose = true,
     mode360 = false,
     fovColor = Color3.fromRGB(255, 0, 0),
     targetedColor = Color3.fromRGB(0, 255, 0),
     rainbowFov = false,
     
-    -- Visual
     xray = false, fullBright = false, nightVision = false,
     noShadows = false, noBloom = false, noSunRays = false,
     rainbowLighting = false, noFog = false
@@ -59,13 +57,13 @@ local silentAim = {
     Enabled = false,
     MasterEnabled = false,
     Mode = "Hold",
-    HoldKey = Enum.KeyCode.E,          -- ✅ Enum
+    HoldKey = Enum.KeyCode.E,
     ListeningForBind = false,
     Prediction = 0.187,
     FOV = 500,
     TargetPart = "HumanoidRootPart",
     ShowFovCircle = true,
-    MaxDistance = 5000,
+    MaxDistance = 0,
     PrioritizeClose = true,
     Mode360 = false,
     FovColor = Color3.fromRGB(100, 200, 255),
@@ -77,7 +75,7 @@ local silentAim = {
 local esp = {
     Enabled = false,
     ShowName = true, ShowHealth = true, ShowDistance = true,
-    ShowChi = true, ShowStamina = true, ShowDebug = false,
+    ShowChi = true, ShowStamina = true,
     TextColor = Color3.fromRGB(255, 255, 255),
     HealthColor = Color3.fromRGB(0, 255, 0),
     DistanceColor = Color3.fromRGB(255, 255, 0),
@@ -113,7 +111,6 @@ local ALL_BODY_PARTS = {
     "LeftHand", "RightHand", "LeftFoot", "RightFoot"
 }
 
--- FOV круги
 local fovCircle
 pcall(function()
     fovCircle = Drawing.new("Circle")
@@ -150,47 +147,79 @@ local function getServerRegion()
     return ok and region and tostring(region) or "Unknown"
 end
 
---> [< CHI/STAM — УМНЫЙ ПОИСК >] <--
+--> [< CHI/STAM — РАСШИРЕННЫЙ ПОИСК >] <--
 
--- ✅ Ищем именно ТЕКУЩЕЕ значение (не max, не level)
-local function findStatValue(root, keywords, excludeKeywords)
+local function tryReadVal(obj)
+    if not obj then return nil end
+    local ok, v = pcall(function() return tonumber(obj.Value) end)
+    if ok and v and v > 0 then return math.floor(v) end
+    return nil
+end
+
+local function searchInRoot(root, keywords, exclude)
     if not root then return nil end
-    local best = nil
-    local bestScore = -1
     
+    -- ✅ 1. Attributes
+    local attrResult = nil
+    pcall(function()
+        for _, attr in ipairs(root:GetAttributes()) do
+            local lower = string.lower(attr)
+            local matches = false
+            for _, kw in ipairs(keywords) do
+                if lower:find(kw, 1, true) then matches = true; break end
+            end
+            if not matches then goto continue end
+            
+            local excluded = false
+            for _, ex in ipairs(exclude) do
+                if lower:find(ex, 1, true) then excluded = true; break end
+            end
+            if excluded then goto continue end
+            
+            local v = root:GetAttribute(attr)
+            if type(v) == "number" and v > 0 then
+                attrResult = math.floor(v)
+                return
+            end
+            ::continue::
+        end
+    end)
+    if attrResult then return attrResult end
+    
+    -- ✅ 2. Values
+    local best, bestScore = nil, -1
     for _, obj in ipairs(root:GetDescendants()) do
         if obj:IsA("NumberValue") or obj:IsA("IntValue") then
             local lower = string.lower(obj.Name)
             local matches = false
             for _, kw in ipairs(keywords) do
-                if lower:find(kw, 1, true) then
-                    matches = true
-                    break
-                end
+                if lower:find(kw, 1, true) then matches = true; break end
             end
             if not matches then continue end
             
-            -- Исключаем max/level
             local excluded = false
-            for _, ex in ipairs(excludeKeywords or {}) do
-                if lower:find(ex, 1, true) then
-                    excluded = true
-                    break
-                end
+            for _, ex in ipairs(exclude) do
+                if lower:find(ex, 1, true) then excluded = true; break end
             end
             if excluded then continue end
             
-            -- Считаем score по имени
             local score = 0
-            if lower == "chakra" or lower == "chi" then score = 100
-            elseif lower == "stamina" or lower == "stam" then score = 100
-            elseif lower:find("cur") then score = 90
-            elseif lower:find("current") then score = 85
-            else score = 50 end
+            if lower == "chakra" or lower == "chi" or lower == "stamina" or lower == "stam" then
+                score = 100
+            elseif lower:find("cur", 1, true) then
+                score = 90
+            elseif lower:find("current", 1, true) then
+                score = 85
+            else
+                score = 50
+            end
             
             if score > bestScore then
-                bestScore = score
-                best = obj
+                local v = tryReadVal(obj)
+                if v then
+                    bestScore = score
+                    best = v
+                end
             end
         end
     end
@@ -198,63 +227,67 @@ local function findStatValue(root, keywords, excludeKeywords)
 end
 
 local function getPlayerChiStam(player)
-    local chi, stam = 0, 0
+    local chiKW = {"chakra", "chi"}
+    local stamKW = {"stamina", "stam"}
+    local exclude = {"max", "lvl", "level", "total", "exp", "rate", "regen", "cap", "limit", "booster", "cost", "drain"}
     
-    -- ✅ Ищем ТОЛЬКО текущие значения, исключаем max/level
-    local chiObj = findStatValue(player, {"chakra", "chi"}, {"max", "lvl", "level", "total", "exp"})
-    if chiObj then chi = math.floor(tonumber(chiObj.Value) or 0) end
-    
-    local stamObj = findStatValue(player, {"stamina", "stam"}, {"max", "lvl", "level", "total", "exp"})
-    if stamObj then stam = math.floor(tonumber(stamObj.Value) or 0) end
-    
-    -- Fallback на character
-    if chi == 0 and player.Character then
-        local c = findStatValue(player.Character, {"chakra", "chi"}, {"max", "lvl", "level"})
-        if c then chi = math.floor(tonumber(c.Value) or 0) end
+    local chi = searchInRoot(player, chiKW, exclude)
+    if not chi and player.Character then
+        chi = searchInRoot(player.Character, chiKW, exclude)
     end
-    if stam == 0 and player.Character then
-        local s = findStatValue(player.Character, {"stamina", "stam"}, {"max", "lvl", "level"})
-        if s then stam = math.floor(tonumber(s.Value) or 0) end
+    if not chi then
+        local pg = player:FindFirstChild("PlayerGui")
+        if pg then chi = searchInRoot(pg, chiKW, exclude) end
     end
     
-    return chi, stam
+    local stam = searchInRoot(player, stamKW, exclude)
+    if not stam and player.Character then
+        stam = searchInRoot(player.Character, stamKW, exclude)
+    end
+    if not stam then
+        local pg = player:FindFirstChild("PlayerGui")
+        if pg then stam = searchInRoot(pg, stamKW, exclude) end
+    end
+    
+    return chi or 0, stam or 0
 end
 
--- Debug - полный список всех chi/stam значений
 local function debugScanPlayer()
     print("===== SCAN: CHI/STAM VALUES =====")
     print("LocalPlayer: " .. LocalPlayer.Name)
     
-    local found = {}
-    for _, obj in ipairs(LocalPlayer:GetDescendants()) do
-        if obj:IsA("NumberValue") or obj:IsA("IntValue") then
-            local lower = string.lower(obj.Name)
-            if lower:find("chi") or lower:find("chakra") 
-               or lower:find("stam") then
-                table.insert(found, string.format("  [%s] = %s", obj:GetFullName(), tostring(obj.Value)))
-            end
-        end
-    end
-    
-    print("Найдено значений: " .. #found)
-    for _, line in ipairs(found) do
-        print(line)
-    end
-    
-    -- Character
-    print("--- Character ---")
-    local char = LocalPlayer.Character
-    if char then
-        for _, obj in ipairs(char:GetDescendants()) do
-            if obj:IsA("NumberValue") or obj:IsA("IntValue") then
-                local lower = string.lower(obj.Name)
-                if lower:find("chi") or lower:find("chakra") 
-                   or lower:find("stam") then
-                    print(string.format("  [%s] = %s", obj:GetFullName(), tostring(obj.Value)))
+    local function scan(root, label)
+        print("--- " .. label .. " ---")
+        
+        local attrs = root:GetAttributes()
+        if #attrs > 0 then
+            print("  Attributes:")
+            for _, a in ipairs(attrs) do
+                local v = root:GetAttribute(a)
+                if type(v) == "number" or type(v) == "string" then
+                    print(string.format("    [%s] = %s", a, tostring(v)))
                 end
             end
         end
+        
+        local count = 0
+        for _, obj in ipairs(root:GetDescendants()) do
+            if obj:IsA("NumberValue") or obj:IsA("IntValue") then
+                local lower = string.lower(obj.Name)
+                if lower:find("chi") or lower:find("chakra") 
+                   or lower:find("stam") or lower:find("stm") then
+                    print(string.format("    [%s] = %s", obj:GetFullName(), tostring(obj.Value)))
+                    count = count + 1
+                end
+            end
+        end
+        print("  Total values: " .. count)
     end
+    
+    scan(LocalPlayer, "LocalPlayer")
+    if LocalPlayer.Character then scan(LocalPlayer.Character, "Character") end
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then scan(pg, "PlayerGui") end
     
     print("=====================================")
 end
@@ -351,7 +384,7 @@ local function setNoFog(v)
     end
 end
 
---> [< SILENT AIM >] <--
+--> [< SILENT AIM — ИСПРАВЛЕН >] <--
 
 local silentHook = false
 local oldNamecall = nil
@@ -372,7 +405,11 @@ RunService.Heartbeat:Connect(function()
     local bestScore = math.huge
     local cam = Workspace.CurrentCamera
     local MousePos = cam.ViewportSize / 2
-    local camPos = cam.CFrame.Position
+    
+    -- ✅ MaxDistance от ПЕРСОНАЖА
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local originPos = myRoot and myRoot.Position or cam.CFrame.Position
     
     for _, p in pairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
@@ -383,28 +420,36 @@ RunService.Heartbeat:Connect(function()
         if not part or not hum or hum.Health <= 0 then continue end
         if not part.Parent then continue end
         
-        if silentAim.MaxDistance > 0 then
-            local rootPart = char:FindFirstChild("HumanoidRootPart")
-            if rootPart and (rootPart.Position - camPos).Magnitude > silentAim.MaxDistance then
+        -- ✅ MaxDistance от персонажа
+        local enemyRoot = char:FindFirstChild("HumanoidRootPart")
+        if silentAim.MaxDistance and silentAim.MaxDistance > 0 and enemyRoot then
+            if (enemyRoot.Position - originPos).Magnitude > silentAim.MaxDistance then
                 continue
             end
         end
         
-        local pos, vis = cam:WorldToViewportPoint(part.Position)
-        if not vis then continue end
-        
-        local screenDist = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
-        
-        if not silentAim.Mode360 then
+        -- ✅ 360 mode: без onScreen
+        if silentAim.Mode360 then
+            local worldDist = (part.Position - originPos).Magnitude
+            if worldDist < bestScore then
+                bestScore = worldDist
+                best = part
+            end
+        else
+            -- FOV mode
+            local pos, vis = cam:WorldToViewportPoint(part.Position)
+            if not vis then continue end
+            
+            local screenDist = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
             if screenDist > silentAim.FOV then continue end
-        end
-        
-        local worldDist = (part.Position - camPos).Magnitude
-        local score = silentAim.PrioritizeClose and worldDist or screenDist
-        
-        if score < bestScore then
-            bestScore = score
-            best = part
+            
+            local worldDist = (part.Position - originPos).Magnitude
+            local score = silentAim.PrioritizeClose and worldDist or screenDist
+            
+            if score < bestScore then
+                bestScore = score
+                best = part
+            end
         end
     end
 
@@ -643,10 +688,17 @@ local function isVisible(char)
     return not res or res.Instance:IsDescendantOf(char)
 end
 
+-- ✅ ИСПРАВЛЕННЫЙ getTarget
 local function getTarget()
-    local bestT, bestS = nil, math.huge
     local camPos = Camera.CFrame.Position
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    local originPos = myRoot.Position
+    
+    local bestT, bestS = nil, math.huge
     
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer or isSameTeam(p) then continue end
@@ -656,26 +708,39 @@ local function getTarget()
         if not hum or hum.Health <= 0 then continue end
         
         local tp = getBestAimPart(char)
-        if not tp or not isVisible(char) then continue end
+        if not tp then continue end
         
-        if settings.maxDistance > 0 then
-            local rp = char:FindFirstChild("HumanoidRootPart")
-            if rp and (rp.Position - camPos).Magnitude > settings.maxDistance then continue end
+        if settings.wallCheck and not isVisible(char) then continue end
+        
+        -- ✅ MaxDistance от персонажа
+        local enemyRoot = char:FindFirstChild("HumanoidRootPart")
+        if settings.maxDistance and settings.maxDistance > 0 and enemyRoot then
+            if (enemyRoot.Position - originPos).Magnitude > settings.maxDistance then
+                continue
+            end
         end
         
-        local sp, onScreen = Camera:WorldToViewportPoint(tp.Position)
-        if not onScreen then continue end
+        local worldDist = (tp.Position - originPos).Magnitude
         
-        local cd = (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude
-        
-        if not settings.mode360 then
+        -- ✅ 360 mode
+        if settings.mode360 then
+            if worldDist < bestS then
+                bestS = worldDist
+                bestT = p
+            end
+        else
+            local sp, onScreen = Camera:WorldToViewportPoint(tp.Position)
+            if not onScreen then continue end
+            
+            local cd = (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude
             if cd > settings.fov then continue end
+            
+            local score = settings.prioritizeClose and worldDist or cd
+            if score < bestS then
+                bestS = score
+                bestT = p
+            end
         end
-        
-        local dist = (tp.Position - camPos).Magnitude
-        local score = settings.prioritizeClose and dist or cd
-        
-        if score < bestS then bestS = score; bestT = p end
     end
     return bestT
 end
@@ -706,6 +771,8 @@ local function serverHop()
         end
         if #avail > 0 then
             TeleportService:TeleportToPlaceInstance(game.PlaceId, avail[math.random(1, #avail)], LocalPlayer)
+        else
+            Fluent:Notify({Title = "❌", Content = "Нет других серверов", Duration = 3})
         end
     end)
 end
@@ -715,11 +782,39 @@ local function rejoinServer()
     pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
 end
 
+-- ✅ FORCE RECONNECT
+local function forceReconnect()
+    Fluent:Notify({
+        Title = "⚡ Force Reconnect",
+        Content = "Принудительное переподключение...",
+        Duration = 3
+    })
+    
+    task.spawn(function()
+        for i = 1, 3 do
+            local ok = pcall(function()
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+            end)
+            if ok then 
+                print("[FORCE] Попытка " .. i .. " успешна")
+                return 
+            end
+            print("[FORCE] Попытка " .. i .. " не удалась")
+            task.wait(1)
+        end
+        
+        print("[FORCE] Fallback — обычный Teleport")
+        pcall(function()
+            TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        end)
+    end)
+end
+
 --> [< GUI >] <--
 
 local Window = Fluent:CreateWindow({
-    Title = "Universal Shindo v7.1",
-    SubTitle = "Aimbot • Silent Aim • ESP • Colors",
+    Title = "Universal Shindo v8.2",
+    SubTitle = "360° • MaxDistance Fix • CHI/STAM • Force Reconnect",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 500),
     Acrylic = true,
@@ -743,13 +838,13 @@ local Options = Fluent.Options
 
 Tabs.Aimbot:AddToggle("AimOn", {Title = "Enable Aimbot", Default = false}):OnChanged(function(v)
     aimbotEnabled = v
-    if fovCircle then fovCircle.Visible = settings.showFovCircle and v end
+    if fovCircle then fovCircle.Visible = settings.showFovCircle and v and not settings.mode360 end
     if not v then aiming = false; currentTarget = nil end
 end)
 
 Tabs.Aimbot:AddToggle("ShowFOV", {Title = "Show FOV Circle", Default = true}):OnChanged(function(v)
     settings.showFovCircle = v
-    if fovCircle then fovCircle.Visible = v and aimbotEnabled end
+    if fovCircle then fovCircle.Visible = v and aimbotEnabled and not settings.mode360 end
 end)
 
 Tabs.Aimbot:AddColorpicker("FovColor", {Title = "FOV Color", Default = Color3.fromRGB(255, 0, 0)}):OnChanged(function(c)
@@ -771,7 +866,6 @@ Tabs.Aimbot:AddDropdown("AimMode", {Title = "Aim Mode",
     settings.aimMode = (v == "Hold (зажать)") and "Hold" or "Toggle"
 end)
 
--- ✅ Кнопка BIND для Aimbot
 local aimBindButton
 aimBindButton = Tabs.Aimbot:AddButton({
     Title = "🎹 BIND: " .. settings.aimKey.Name,
@@ -779,7 +873,6 @@ aimBindButton = Tabs.Aimbot:AddButton({
     Callback = function()
         settings.ListeningForAimBind = true
         pcall(function() aimBindButton:SetTitle("🎹 Нажмите клавишу...") end)
-        Fluent:Notify({Title = "🎹", Content = "Нажмите клавишу для Aimbot", Duration = 3})
     end
 })
 
@@ -787,7 +880,7 @@ Tabs.Aimbot:AddSlider("FOV", {Title = "FOV Size", Default = 300, Min = 0, Max = 
     settings.fov = v; if fovCircle then fovCircle.Radius = v end
 end)
 
-Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance", Description = "0 = без ограничений", Default = 5000, Min = 0, Max = 5000, Rounding = 10}):OnChanged(function(v)
+Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance", Description = "0 = без ограничений", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v)
     settings.maxDistance = v
 end)
 
@@ -795,8 +888,14 @@ Tabs.Aimbot:AddToggle("PriorClose", {Title = "Prioritize Close Targets", Default
     settings.prioritizeClose = v
 end)
 
-Tabs.Aimbot:AddToggle("Mode360", {Title = "360° Mode", Description = "Игнорирует FOV", Default = false}):OnChanged(function(v)
+Tabs.Aimbot:AddToggle("Mode360", {Title = "360° Mode", Description = "Игнорирует FOV (как XP AIMBOT)", Default = false}):OnChanged(function(v)
     settings.mode360 = v
+    if v and fovCircle then fovCircle.Visible = false end
+    Fluent:Notify({
+        Title = v and "🎯 360° ВКЛ" or "🎯 FOV режим",
+        Content = v and "Поиск без проверки экрана" or "Поиск в FOV",
+        Duration = 2
+    })
 end)
 
 Tabs.Aimbot:AddSlider("Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v)
@@ -812,10 +911,7 @@ Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnCh
 
 --> [< SILENT AIM TAB >] <--
 
-Tabs.Silent:AddToggle("SilentMaster", {
-    Title = "Enable Silent Aim",
-    Default = false
-}):OnChanged(function(v)
+Tabs.Silent:AddToggle("SilentMaster", {Title = "Enable Silent Aim", Default = false}):OnChanged(function(v)
     silentAim.MasterEnabled = v
     if v then enableSilentHook() else disableSilentHook() end
 end)
@@ -854,7 +950,7 @@ Tabs.Silent:AddColorpicker("SilentFovColor", {Title = "Silent FOV Color", Defaul
     if silentFovCircle then silentFovCircle.Color = c end
 end)
 
-Tabs.Silent:AddSlider("SilentMaxDist", {Title = "Max Distance", Default = 5000, Min = 0, Max = 5000, Rounding = 10}):OnChanged(function(v)
+Tabs.Silent:AddSlider("SilentMaxDist", {Title = "Max Distance", Description = "0 = без ограничений", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v)
     silentAim.MaxDistance = v
 end)
 
@@ -862,8 +958,9 @@ Tabs.Silent:AddToggle("SilentPriorClose", {Title = "Prioritize Close", Default =
     silentAim.PrioritizeClose = v
 end)
 
-Tabs.Silent:AddToggle("SilentMode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
+Tabs.Silent:AddToggle("SilentMode360", {Title = "360° Mode", Description = "Игнорирует FOV", Default = false}):OnChanged(function(v)
     silentAim.Mode360 = v
+    if v and silentFovCircle then silentFovCircle.Visible = false end
 end)
 
 Tabs.Silent:AddSlider("SilentPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v)
@@ -904,7 +1001,7 @@ Tabs.ESP:AddSlider("EspSize", {Title = "Text Size", Default = 14, Min = 8, Max =
 
 Tabs.ESP:AddButton({
     Title = "🔍 Скан моих значений (debug)",
-    Description = "Покажет ВСЕ chi/chakra/stam значения в консоли",
+    Description = "Покажет ВСЕ chi/chakra/stam значения в консоли (F9)",
     Callback = function()
         debugScanPlayer()
         Fluent:Notify({Title = "🔍", Content = "Смотри F9 в консоли", Duration = 4})
@@ -986,8 +1083,24 @@ Tabs.Visual:AddToggle("NoFog", {Title = "No Fog", Default = false}):OnChanged(fu
 
 --> [< SERVER TAB >] <--
 
-Tabs.Server:AddButton({Title = "🔄 Server Hop", Callback = function() serverHop() end})
-Tabs.Server:AddButton({Title = "🔁 Rejoin Server", Callback = function() rejoinServer() end})
+Tabs.Server:AddButton({
+    Title = "🔄 Server Hop",
+    Description = "Переход на другой сервер",
+    Callback = function() serverHop() end
+})
+
+Tabs.Server:AddButton({
+    Title = "🔁 Rejoin Server",
+    Description = "Переподключение к текущему серверу",
+    Callback = function() rejoinServer() end
+})
+
+-- ✅ FORCE RECONNECT кнопка
+Tabs.Server:AddButton({
+    Title = "⚡ Force Reconnect",
+    Description = "Принудительное переподключение (3 попытки)",
+    Callback = function() forceReconnect() end
+})
 
 local pingPara = Tabs.Server:AddParagraph({Title = "📶 Пинг", Content = "..."})
 local regPara = Tabs.Server:AddParagraph({Title = "🌍 Регион", Content = "..."})
@@ -1008,51 +1121,37 @@ task.spawn(function()
     end
 end)
 
---> [< ГЛАВНЫЙ ЦИКЛ — ИСПРАВЛЕН >] <--
+--> [< ГЛАВНЫЙ ЦИКЛ >] <--
 
--- ✅ ИСПРАВЛЕНО: сравнение Enum.KeyCode напрямую
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     
-    -- BIND Silent Aim
     if silentAim.ListeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             silentAim.HoldKey = input.KeyCode
             silentAim.ListeningForBind = false
-            pcall(function()
-                silentBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name)
-            end)
+            pcall(function() silentBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end)
             Fluent:Notify({Title = "✅ Silent Bind", Content = input.KeyCode.Name, Duration = 3})
         end
         return
     end
     
-    -- BIND Aimbot
     if settings.ListeningForAimBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             settings.aimKey = input.KeyCode
             settings.ListeningForAimBind = false
-            pcall(function()
-                aimBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name)
-            end)
+            pcall(function() aimBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end)
             Fluent:Notify({Title = "✅ Aimbot Bind", Content = input.KeyCode.Name, Duration = 3})
         end
         return
     end
     
-    -- Silent Aim Toggle
     if silentAim.MasterEnabled and silentAim.Mode == "Toggle" then
         if input.KeyCode == silentAim.HoldKey then
             silentAim.Enabled = not silentAim.Enabled
-            Fluent:Notify({
-                Title = silentAim.Enabled and "🎭 Silent ON" or "🎭 Silent OFF",
-                Content = "Toggle",
-                Duration = 1
-            })
         end
     end
     
-    -- Aimbot: ✅ прямое сравнение Enum
     if aimbotEnabled and input.KeyCode == settings.aimKey then
         if settings.aimMode == "Hold" then
             aiming = true
@@ -1183,9 +1282,10 @@ pcall(function()
 end)
 
 print("====================================")
-print("✅ Universal Shindo v7.1 загружен!")
-print("✅ Bind: Enum сравнение (работает)")
-print("✅ Aimbot/Silent: исправлены клавиши")
-print("🔍 CHI/STAM: ищет только current значения")
+print("✅ Universal Shindo v8.2 загружен!")
+print("✅ MaxDistance: от ПЕРСОНАЖА (не камеры)")
+print("✅ 360° Mode: без проверки onScreen")
+print("✅ CHI/STAM: Attributes + PlayerGui + рекурсия")
+print("✅ Force Reconnect: 3 попытки + fallback")
 print("📌 RightControl - скрыть меню")
 print("====================================")
