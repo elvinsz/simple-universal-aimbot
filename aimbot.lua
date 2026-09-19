@@ -1,12 +1,14 @@
 --[[
-    Flumium Client v1.2.1
-    ✅ FIX: pushHistory объявлена до teleportToJob (Server Hop / Random Server снова работают)
-    ✅ Один клик = одна попытка телепорта (без авторетраев)
+    Flumium Client v1.4
+    ✅ Server region detection via IP (Method 1: get IP → geolocate)
+    ✅ Убрана функция Random Server
+    ✅ pushHistory объявлена до teleportToJob
+    ✅ Один клик = одна попытка телепорта
     ✅ JobId-aware cleanup, session token, init guard
     ✅ Fluent кэш локально
     ✅ Aimbot 2 (клавиша [1]), Silent Aim, Kunai Marker
     ✅ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД
-    ✅ Server: Job ID + история 10 + Join Last + Random + Region
+    ✅ Server: Job ID + история 10 + Join Last + Region
     ✅ Pink Theme, Low Detail Mode, FPS Unlocker
 ]]
 
@@ -216,7 +218,7 @@ local shindoEvent
 pcall(function() shindoEvent = LocalPlayer:WaitForChild("startevent", 8) end)
 
 -- ============================================================
--- HISTORY STORAGE (нужна teleportToJob — объявляем РАНЬШЕ)
+-- HISTORY STORAGE
 -- ============================================================
 local HISTORY_FILE = "FlumiumJobHistory.json"
 local HISTORY_MAX = 10
@@ -371,7 +373,6 @@ local hue, lightingHue = 0, 0
 local rainbowSpeed = 0.005
 
 local __serverHopBusy = false
-local __randomBusy = false
 
 local ALL_BODY_PARTS = {
     "Head", "HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso",
@@ -406,29 +407,101 @@ pcall(function()
     getgenv().Flumium_Drawing_FovS = silentFovCircle
 end)
 
---> [< ПИНГ / РЕГИОН >] <--
+--> [< ПИНГ / РЕГИОН via IP (Method 1) >] <--
 local function getPlayerPing()
     local ok, ping = pcall(function() return LocalPlayer:GetNetworkPing() end)
     return ok and ping and math.floor(ping * 1000) or 0
 end
 
-local __serverLocCache = nil
-local function getServerLocation(force)
-    if __serverLocCache and not force then return __serverLocCache end
+-- ============================================================
+-- METHOD 1: SHAG 1 — Получить IP-адрес сервера
+-- HttpService в Roblox выполняет запросы с IP игрового сервера,
+-- поэтому сервис «what-is-my-ip» вернёт IP именно сервера Roblox.
+-- Пробуем несколько сервисов — если один упал/заблокирован, идём к следующему.
+-- ============================================================
+local IP_SERVICES = {
+    { url = "https://api4.my-ip.io/ip.json",     parser = function(data) return data.ip end,     raw = "ip" },
+    { url = "https://api.ipify.org?format=json", parser = function(data) return data.ip end,     raw = "ip" },
+    { url = "https://ipinfo.io/json",            parser = function(data) return data.ip end,     raw = "ip" },
+    { url = "https://api.ip.sb/jsonip",          parser = function(data) return data.ip end,     raw = "ip" },
+}
+
+local function fetchServerIP()
+    for i, svc in ipairs(IP_SERVICES) do
+        local ok, resp = pcall(function()
+            return game:HttpGet(svc.url, true)
+        end)
+        if ok and type(resp) == "string" and #resp > 0 then
+            -- Пробуем JSON
+            local ok2, data = pcall(function() return HttpService:JSONDecode(resp) end)
+            if ok2 and type(data) == "table" and data[svc.raw] then
+                local ip = tostring(data[svc.raw])
+                if ip:match("^%d+%.%d+%.%d+%.%d+$") then
+                    __dbg("server IP via " .. svc.url .. " → " .. ip)
+                    return ip
+                end
+            end
+            -- Если сервис вернул plain text с IP
+            local ip = resp:match("(%d+%.%d+%.%d+%.%d+)")
+            if ip then
+                __dbg("server IP via " .. svc.url .. " (raw) → " .. ip)
+                return ip
+            end
+        end
+    end
+    __dbg("server IP: все сервисы упали")
+    return nil
+end
+
+-- ============================================================
+-- METHOD 1: SHAG 2 — Геолоцировать IP через ip-api.com
+-- Возвращает: status, country, countryCode, region, regionName,
+-- city, isp, org, as, lat, lon, timezone, query (сам IP)
+-- ============================================================
+local function geolocateIP(ip)
+    if not ip or ip == "" then return nil end
+    local url = "http://ip-api.com/json/" .. ip
+             .. "?fields=status,country,countryCode,region,regionName,city,isp,org,as,lat,lon,timezone,query"
     local ok, resp = pcall(function()
-        return game:HttpGet("http://ip-api.com/json/?fields=status,country,countryCode,regionName,city,isp,org,lat,lon,query,timezone", true)
+        return game:HttpGet(url, true)
     end)
     if not ok or type(resp) ~= "string" or resp == "" then
-        return { status = "fail", err = "http failed" }
+        return { status = "fail", err = "geolocation http failed", query = ip }
     end
     local ok2, data = pcall(function() return HttpService:JSONDecode(resp) end)
     if not ok2 or type(data) ~= "table" then
-        return { status = "fail", err = "parse failed" }
+        return { status = "fail", err = "geolocation parse failed", query = ip }
     end
+    if data.status ~= "success" then
+        return { status = "fail", err = tostring(data.message or "ip-api returned fail"), query = ip }
+    end
+    return data
+end
+
+-- Кэш результата (перезапрашивается по force=true)
+local __serverLocCache = nil
+local function getServerLocation(force)
+    if __serverLocCache and not force then return __serverLocCache end
+
+    local ip = fetchServerIP()
+    if not ip then
+        local result = { status = "fail", err = "no server IP" }
+        __serverLocCache = result
+        return result
+    end
+
+    local data = geolocateIP(ip)
+    if not data then
+        local result = { status = "fail", err = "geolocation returned nil", query = ip }
+        __serverLocCache = result
+        return result
+    end
+
     __serverLocCache = data
     return data
 end
 
+-- Определение страны клиента (для расчёта расстояния «от тебя»)
 local function getClientCountry()
     local ok, code = pcall(function()
         return LocalizationService:GetCountryRegionForPlayerAsync(LocalPlayer)
@@ -437,6 +510,7 @@ local function getClientCountry()
     return "??"
 end
 
+-- Haversine — расстояние по координатам
 local function haversine(lat1, lon1, lat2, lon2)
     local R = 6371
     local dLat = math.rad(lat2 - lat1)
@@ -1349,7 +1423,7 @@ end
 
 --> [< GUI >] <--
 local Window = Fluent:CreateWindow({
-    Title = "Flumium Client v1.2.1",
+    Title = "Flumium Client v1.4",
     SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 520),
@@ -1736,15 +1810,21 @@ Tabs.Visual:AddToggle("NoFog",{Title = "No Fog", Default = false}):OnChanged(fun
 --> [< SERVER TAB >] <--
 local topPingPara = Tabs.Server:AddParagraph({ Title = "📶 Ping / 🌍 Server Region", Content = "Загрузка..." })
 local topIpPara = Tabs.Server:AddParagraph({ Title = "🖥️ Server IP / Location (via ip-api)", Content = "Загрузка..." })
+local topRegionPara = Tabs.Server:AddParagraph({ Title = "📍 Server Region (detailed)", Content = "Загрузка..." })
 
+-- ✅ Первичная загрузка — с двухшаговым запросом IP → геолокация
 task.spawn(function()
     task.wait(0.5)
     local info = getServerLocation()
     local clientCc = getClientCountry()
     local cLat, cLon, cCode = getClientCoords()
+
     local p = getPlayerPing()
     local dot = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
-    pcall(function() topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, clientCc)) end)
+    pcall(function()
+        topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, clientCc))
+    end)
+
     if info and info.status == "success" then
         local distText = "?"
         if cLat and cLon and info.lat and info.lon then
@@ -1754,20 +1834,67 @@ task.spawn(function()
             topIpPara:SetDesc(string.format(
                 "%s, %s (%s)  |  IP: %s  |  ISP: %s  |  ~%s от тебя",
                 info.city or "?", info.country or "?", info.countryCode or "?",
-                info.query or "?", info.isp or "?", distText
+                info.query or "?", info.isp or info.org or "?", distText
+            ))
+        end)
+        pcall(function()
+            topRegionPara:SetDesc(string.format(
+                "Region: %s | Timezone: %s | Coords: %s, %s | AS: %s",
+                info.regionName or info.region or "?",
+                info.timezone or "?",
+                tostring(info.lat or "?"), tostring(info.lon or "?"),
+                tostring(info.as or "?")
             ))
         end)
     else
-        pcall(function() topIpPara:SetDesc("Не удалось получить IP сервера: " .. tostring(info and info.err or "unknown")) end)
+        pcall(function()
+            topIpPara:SetDesc("Не удалось получить IP сервера: " .. tostring(info and info.err or "unknown"))
+        end)
+        pcall(function()
+            topRegionPara:SetDesc("Region: неизвестен")
+        end)
     end
 end)
-
--- ⚠️ ВАЖНО: HISTORY_FILE, loadHistory, saveHistory, pushHistory, fmtTime
--- уже объявлены ВЫШЕ, до teleportToJob. Здесь НЕ дублируем.
 
 Tabs.Server:AddButton({ Title = "🔄 Server Hop", Callback = function() serverHop() end })
 Tabs.Server:AddButton({ Title = "🔁 Rejoin Server", Callback = function() rejoinServer() end })
 Tabs.Server:AddButton({ Title = "⚡ Force Reconnect", Callback = function() forceReconnect() end })
+Tabs.Server:AddButton({
+    Title = "📡 Обновить данные о сервере",
+    Description = "Перезапрашивает IP и геолокацию сервера",
+    Callback = function()
+        Fluent:Notify({Title = "📡", Content = "Обновляю...", Duration = 2})
+        task.spawn(function()
+            local info = getServerLocation(true)
+            if info and info.status == "success" then
+                local cLat, cLon = getClientCoords()
+                local distText = "?"
+                if cLat and cLon and info.lat and info.lon then
+                    distText = haversine(cLat, cLon, info.lat, info.lon) .. " km"
+                end
+                pcall(function()
+                    topIpPara:SetDesc(string.format(
+                        "%s, %s (%s)  |  IP: %s  |  ISP: %s  |  ~%s от тебя",
+                        info.city or "?", info.country or "?", info.countryCode or "?",
+                        info.query or "?", info.isp or info.org or "?", distText
+                    ))
+                end)
+                pcall(function()
+                    topRegionPara:SetDesc(string.format(
+                        "Region: %s | Timezone: %s | Coords: %s, %s | AS: %s",
+                        info.regionName or info.region or "?",
+                        info.timezone or "?",
+                        tostring(info.lat or "?"), tostring(info.lon or "?"),
+                        tostring(info.as or "?")
+                    ))
+                end)
+                Fluent:Notify({Title = "✅", Content = "Данные обновлены", Duration = 2})
+            else
+                Fluent:Notify({Title = "❌", Content = "Не удалось: " .. tostring(info and info.err or "?"), Duration = 3})
+            end
+        end)
+    end
+})
 
 local jobSection = Tabs.Server:AddSection("Job ID")
 local jobPara = jobSection:AddParagraph({
@@ -1888,110 +2015,12 @@ jobSection:AddButton({
     end
 })
 
-local randomSection = Tabs.Server:AddSection("Random Server")
-randomSection:AddParagraph({
-    Title = "ℹ️ О регионе",
-    Content = "Roblox не отдаёт регион напрямую. Пинг — приблизительный ориентир."
-})
-local REGION_PRESETS = {
-    ["🌍 Any (0–500 ms)"]   = {0, 500},
-    ["🇪🇺 Europe (0–90 ms)"] = {0, 90},
-    ["🇺🇸 USA (80–170 ms)"]  = {80, 170},
-    ["🌏 Asia (100–250 ms)"] = {100, 250},
-    ["🌎 Far (200–500 ms)"]  = {200, 500},
-}
-local randomState = { region = "🌍 Any (0–500 ms)", minPing = 0, maxPing = 500, minPlayers = 1, useRegionPreset = true, closestBias = true }
-local minPingSlider, maxPingSlider
-randomSection:AddDropdown("RegionPreset", {
-    Title = "🌐 Region Filter (via ping)",
-    Values = { "🌍 Any (0–500 ms)", "🇪🇺 Europe (0–90 ms)", "🇺🇸 USA (80–170 ms)", "🌏 Asia (100–250 ms)", "🌎 Far (200–500 ms)" },
-    Default = "🌍 Any (0–500 ms)", Multi = false,
-    Callback = function(v)
-        randomState.region = v
-        if randomState.useRegionPreset and REGION_PRESETS[v] then
-            randomState.minPing = REGION_PRESETS[v][1]
-            randomState.maxPing = REGION_PRESETS[v][2]
-            pcall(function()
-                minPingSlider:SetValue(randomState.minPing)
-                maxPingSlider:SetValue(randomState.maxPing)
-            end)
-        end
-    end
-})
-randomSection:AddToggle("UseRegionPreset", {
-    Title = "Использовать пресет региона", Default = true
-}):OnChanged(function(v) randomState.useRegionPreset = v end)
-minPingSlider = randomSection:AddSlider("MinPing", { Title = "Min Ping (ms)", Default = 0, Min = 0, Max = 500, Rounding = 0 }):OnChanged(function(v) randomState.minPing = v end)
-maxPingSlider = randomSection:AddSlider("MaxPing", { Title = "Max Ping (ms)", Default = 500, Min = 0, Max = 500, Rounding = 0 }):OnChanged(function(v) randomState.maxPing = v end)
-randomSection:AddSlider("MinPlayers", { Title = "Min Players", Description = "Не заходить в пустые серверы", Default = 1, Min = 0, Max = 50, Rounding = 0 }):OnChanged(function(v) randomState.minPlayers = v end)
-randomSection:AddToggle("ClosestBias", {
-    Title = "Смещение в сторону низкого пинга", Default = true
-}):OnChanged(function(v) randomState.closestBias = v end)
-
-local function fetchPublicServers()
-    local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
-    local ok, response = pcall(function() return game:HttpGet(url, true) end)
-    if not ok or type(response) ~= "string" then return {} end
-    local ok2, data = pcall(function() return HttpService:JSONDecode(response) end)
-    if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then return {} end
-    return data.data
-end
-local function pickRandomServer()
-    local servers = fetchPublicServers()
-    if #servers == 0 then return nil, "API пуст / недоступно" end
-    local candidates = {}
-    for _, s in ipairs(servers) do
-        local id, playing, maxP, ping = s.id, tonumber(s.playing) or 0, tonumber(s.maxPlayers) or 0, tonumber(s.ping) or 999
-        if id and id ~= game.JobId and playing < maxP and playing >= randomState.minPlayers
-           and ping >= randomState.minPing and ping <= randomState.maxPing then
-            candidates[#candidates + 1] = { id = id, ping = ping, playing = playing, maxPlayers = maxP }
-        end
-    end
-    if #candidates == 0 then return nil, "Нет серверов под фильтр" end
-    table.sort(candidates, function(a, b) return a.ping < b.ping end)
-    local pick
-    if randomState.closestBias then
-        pick = candidates[math.random(1, math.min(10, #candidates))]
-    else
-        pick = candidates[math.random(1, #candidates)]
-    end
-    return pick
-end
-randomSection:AddButton({
-    Title = "🎲 Random Server",
-    Description = "Найти живой сервер по заданным фильтрам",
-    Callback = function()
-        if __randomBusy then
-            Fluent:Notify({Title = "⏳", Content = "Уже ищу...", Duration = 2})
-            return
-        end
-        __randomBusy = true
-        Fluent:Notify({Title = "🎲 Поиск", Content = "Опрашиваю список серверов...", Duration = 2})
-        task.spawn(function()
-            local pick, err = pickRandomServer()
-            if not pick then
-                Fluent:Notify({Title = "❌", Content = err or "Не найдено", Duration = 4})
-                __randomBusy = false
-                return
-            end
-            Fluent:Notify({
-                Title = "🎲 Найден",
-                Content = string.format("%s... | ping %d | %d/%d",
-                    pick.id:sub(1, 8), pick.ping, pick.playing, pick.maxPlayers),
-                Duration = 3
-            })
-            teleportToJob(pick.id, "RANDOM")
-            task.wait(3)
-            __randomBusy = false
-        end)
-    end
-})
-
 -- ============================================================
 -- ФОНОВЫЕ ЦИКЛЫ
 -- ============================================================
 getgenv().Flumium_LoopsRunning = true
 
+-- Пинг — каждые 1.5 сек
 task.spawn(function()
     while getgenv().Flumium_LoopsRunning and __isCurrentSession() do
         task.wait(1.5)
@@ -2002,10 +2031,11 @@ task.spawn(function()
     end
 end)
 
+-- Геолокация сервера — раз в 60 сек (плюс сброс кэша IP)
 task.spawn(function()
     task.wait(2)
     while getgenv().Flumium_LoopsRunning and __isCurrentSession() do
-        task.wait(30)
+        task.wait(60)
         __serverLocCache = nil
         local info = getServerLocation(true)
         if info and info.status == "success" then
@@ -2018,7 +2048,16 @@ task.spawn(function()
                 topIpPara:SetDesc(string.format(
                     "%s, %s (%s)  |  IP: %s  |  ISP: %s  |  ~%s от тебя",
                     info.city or "?", info.country or "?", info.countryCode or "?",
-                    info.query or "?", info.isp or "?", distText
+                    info.query or "?", info.isp or info.org or "?", distText
+                ))
+            end)
+            pcall(function()
+                topRegionPara:SetDesc(string.format(
+                    "Region: %s | Timezone: %s | Coords: %s, %s | AS: %s",
+                    info.regionName or info.region or "?",
+                    info.timezone or "?",
+                    tostring(info.lat or "?"), tostring(info.lon or "?"),
+                    tostring(info.as or "?")
                 ))
             end)
         end
@@ -2164,7 +2203,13 @@ pcall(function()
     if SaveManager then
         SaveManager:SetLibrary(Fluent)
         SaveManager:IgnoreThemeSettings()
-        SaveManager:SetIgnoreIndexes({})
+        SaveManager:SetIgnoreIndexes({
+            "ServerHop", "RejoinServer", "ForceReconnect",
+            "RefreshServerInfo",
+            "JoinLastServer", "JobIDInput", "JobHistory",
+            "CopyCurrentJobID", "RefreshJobID", "PasteFromClipboard",
+            "RefreshHistoryList", "ClearHistory",
+        })
         SaveManager:SetFolder("Flumium/Configs")
         SaveManager:BuildConfigSection(Tabs.UI)
         SaveManager:LoadAutoloadConfig()
@@ -2246,10 +2291,10 @@ __regFn(function()
 end)
 
 print("====================================")
-print("✅ Flumium Client v1.2.1 загружен!")
-print("🛠️ FIX: Server Hop и Random Server снова работают")
+print("✅ Flumium Client v1.4 загружен!")
+print("📍 Region detection: IP → ip-api (Method 1)")
+print("🚫 Random Server удалён")
 print("🔁 Один клик = одна попытка телепорта")
-print("🌐 Rejoin → cleanup пропускается (JobId-aware)")
 print("🎯 Aimbot 2: клавиша [1], целится ВЫШЕ ГОЛОВЫ")
 print("👁️ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД")
 print("📌 RightControl - скрыть меню")
