@@ -1,110 +1,258 @@
 --[[
-    Universal Aimbot v2.0
-    GitHub: https://github.com/elvinsz/simple-universal-aimbot
-    Описание: Универсальный аимбот с визуальными эффектами, системой конфигов и server hop
+    Flumium Client v1.1
+    ✅ FIX: autoexec больше не ломается после rejoin (JobId-aware cleanup)
+    ✅ FIX: Fluent кэшируется локально — не виснет если github блокируется
+    ✅ FIX: диагностика в консоль — видно где падает
+    ✅ Aimbot 2 (клавиша [1]), Silent Aim, Kunai Marker
+    ✅ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД
+    ✅ Server: Job ID + история + Join Last + Random + Region
+    ✅ Pink Theme, Low Detail Mode, FPS Unlocker
 ]]
 
--- Проверка на повторную загрузку
-if getgenv().UniversalAimbotLoaded then
-    print("⚠️ Universal Aimbot уже загружен!")
-    return
+-- ============================================================
+-- DIAGNOSTICS
+-- ============================================================
+local function __dbg(msg) print("[Flumium] " .. tostring(msg)) end
+__dbg("start | PlaceId=" .. tostring(game.PlaceId) .. " | JobId=" .. tostring(game.JobId))
+
+-- ============================================================
+-- UNLOAD PREVIOUS INSTANCE (JobId-aware)
+-- ============================================================
+local __prevJobId = getgenv().Flumium_LastJobId
+local __currJobId = game.JobId
+local __sameServer = (__prevJobId ~= nil
+                    and __prevJobId == __currJobId
+                    and __currJobId ~= "")
+
+if __sameServer then
+    __dbg("same server detected — unloading previous instance")
+    if type(getgenv().Flumium_Unload) == "function" then
+        pcall(getgenv().Flumium_Unload)
+        __dbg("previous cleanup OK")
+    end
+else
+    __dbg("new server / first run — skipping cleanup")
 end
-getgenv().UniversalAimbotLoaded = true
 
--- Загрузка Rayfield (БЕЗ pcall - для совместимости с XENO)
-print("🔄 Загрузка Rayfield...")
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
-if not Rayfield then
-    warn("❌ Rayfield не загружен! Проверьте интернет или смените инжектор.")
-    getgenv().UniversalAimbotLoaded = false
-    return
+getgenv().Flumium_Unload = nil
+getgenv().Flumium_LastJobId = __currJobId
+getgenv().Fluent = nil
+getgenv().SaveManager = nil
+getgenv().InterfaceManager = nil
+if _G then
+    _G.Fluent = nil
+    _G.SaveManager = nil
+    _G.InterfaceManager = nil
 end
 
-print("✅ Rayfield загружен!")
-
--- Сервисы
-local RunService = game:GetService("RunService")
-local players = game:GetService("Players")
-local workspace = game:GetService("Workspace")
-local plr = players.LocalPlayer
-local camera = workspace.CurrentCamera
-local UserInputService = game:GetService("UserInputService")
-local mouse = plr:GetMouse()
-local HttpService = game:GetService("HttpService")
-local Lighting = game:GetService("Lighting")
-local TeleportService = game:GetService("TeleportService")
-
---> [< ПАПКИ КОНФИГОВ >] <--
-
-local CONFIG_FOLDER = "UniversalAimbot"
-local CONFIGS_FOLDER = "UniversalAimbot/Configs"
-local AUTOEXEC_FILE = "UniversalAimbot/autoexec.json"
-
-local function ensureFolders()
+if __sameServer then
     pcall(function()
-        if not isfolder(CONFIG_FOLDER) then
-            makefolder(CONFIG_FOLDER)
+        local CoreGui = game:GetService("CoreGui")
+        local Players = game:GetService("Players")
+        local pg = Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
+        for _, parent in ipairs({CoreGui, pg}) do
+            if parent then
+                for _, name in ipairs({"Fluent", "FluentUI", "FluentGui", "Flumium"}) do
+                    local obj = parent:FindFirstChild(name)
+                    if obj then obj:Destroy() end
+                end
+            end
         end
-        if not isfolder(CONFIGS_FOLDER) then
-            makefolder(CONFIGS_FOLDER)
-        end
+    end)
+
+    for _, key in ipairs({"Flumium_Drawing_Fov1", "Flumium_Drawing_Fov2", "Flumium_Drawing_FovS"}) do
+        local d = getgenv()[key]
+        if d then pcall(function() d:Remove() end) end
+        getgenv()[key] = nil
+    end
+
+    pcall(function()
+        if type(setfpscap) == "function" then setfpscap(60) end
     end)
 end
 
-ensureFolders()
+-- ============================================================
+-- SAFE RE-EXECUTE TRACKER
+-- ============================================================
+local __CLEANUP = { conns = {}, hooks = {}, insts = {}, fns = {}, done = false }
+local function __regConn(c)  table.insert(__CLEANUP.conns, c);  return c end
+local function __regHook(fn) table.insert(__CLEANUP.hooks, fn) end
+local function __regInst(i)  table.insert(__CLEANUP.insts, i);  return i end
+local function __regFn(fn)   table.insert(__CLEANUP.fns, fn)   end
+
+local function __runCleanup()
+    if __CLEANUP.done then return end
+    __CLEANUP.done = true
+    for _, c in ipairs(__CLEANUP.conns) do pcall(function() c:Disconnect() end) end
+    for _, fn in ipairs(__CLEANUP.fns) do pcall(fn) end
+    for _, fn in ipairs(__CLEANUP.hooks) do pcall(fn) end
+    for _, i in ipairs(__CLEANUP.insts) do pcall(function() i:Destroy() end) end
+    __CLEANUP.conns, __CLEANUP.fns, __CLEANUP.hooks, __CLEANUP.insts = {}, {}, {}, {}
+end
+
+getgenv().Flumium_Unload = __runCleanup
+
+-- ============================================================
+-- LOAD UI LIBRARY (с локальным кэшем)
+-- ============================================================
+local FLUENT_URL    = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
+local FLUENT_CACHE  = "Flumium_Fluent.lua"
+local SAVEMGR_URL   = "https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"
+local IFACEMGR_URL  = "https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"
+
+local FluentSource = nil
+
+if type(readfile) == "function" and type(isfile) == "function" then
+    local ok, exists = pcall(isfile, FLUENT_CACHE)
+    if ok and exists then
+        local ok2, content = pcall(readfile, FLUENT_CACHE)
+        if ok2 and type(content) == "string" and #content > 1000 then
+            FluentSource = content
+            __dbg("Fluent loaded from local cache (" .. #content .. " bytes)")
+        end
+    end
+end
+
+if not FluentSource then
+    __dbg("downloading Fluent from github...")
+    local ok, result = pcall(function()
+        return game:HttpGet(FLUENT_URL, true)
+    end)
+    if ok and type(result) == "string" and #result > 1000 then
+        FluentSource = result
+        __dbg("Fluent downloaded (" .. #result .. " bytes)")
+        if type(writefile) == "function" then
+            pcall(function() writefile(FLUENT_CACHE, result) end)
+            __dbg("Fluent cached to " .. FLUENT_CACHE)
+        end
+    else
+        __dbg("Fluent download FAILED: " .. tostring(result))
+    end
+end
+
+if not FluentSource then
+    warn("[Flumium] ❌ Не удалось загрузить Fluent.")
+    warn("[Flumium]     Проверь доступ к github.com / HTTP / интернет.")
+    warn("[Flumium]     Можно скачать main.lua вручную и положить как " .. FLUENT_CACHE)
+    return
+end
+
+local FluentFn, compileErr = loadstring(FluentSource)
+if type(FluentFn) ~= "function" then
+    warn("[Flumium] ❌ Fluent compile error: " .. tostring(compileErr))
+    return
+end
+
+local Fluent = FluentFn()
+if type(Fluent) ~= "table" then
+    warn("[Flumium] ❌ Fluent() вернул " .. type(Fluent) .. ", ожидалась таблица.")
+    return
+end
+
+__dbg("Fluent OK")
+
+local SaveManager = nil
+local InterfaceManager = nil
+
+pcall(function()
+    local src = game:HttpGet(SAVEMGR_URL, true)
+    if type(src) == "string" and #src > 100 then
+        SaveManager = loadstring(src)()
+    end
+end)
+
+pcall(function()
+    local src = game:HttpGet(IFACEMGR_URL, true)
+    if type(src) == "string" and #src > 100 then
+        InterfaceManager = loadstring(src)()
+    end
+end)
+
+if not SaveManager then __dbg("SaveManager — не загружен (не критично)") end
+if not InterfaceManager then __dbg("InterfaceManager — не загружен (не критично)") end
+
+-- ============================================================
+-- SERVICES
+-- ============================================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local LocalizationService = game:GetService("LocalizationService")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+local shindoEvent
+pcall(function() shindoEvent = LocalPlayer:WaitForChild("startevent", 8) end)
 
 --> [< НАСТРОЙКИ >] <--
-
 local settings = {
-    -- Aimbot
-    fov = 300,
-    smoothing = 0.15,
-    prediction = 0.065,
-    wallCheck = false,
-    stickyAim = false,
-    teamCheck = false,
-    healthCheck = false,
-    minHealth = 0,
-    aimPart = "Auto",
-    aimMode = "Hold",
-    key = "BackSlash",
-    showFovCircle = true,
-    maxDistance = 5000,
-    prioritizeClose = true,
+    fov = 300, smoothing = 0.15, prediction = 0.065,
+    wallCheck = false, teamCheck = false, aimPart = "Auto", aimMode = "Hold",
+    aimKey = Enum.KeyCode.BackSlash, ListeningForAimBind = false,
+    showFovCircle = true, maxDistance = 0, prioritizeClose = true, mode360 = false,
+    fovColor = Color3.fromRGB(255, 0, 0), targetedColor = Color3.fromRGB(0, 255, 0),
     rainbowFov = false,
-    fovColor = Color3.fromRGB(255, 0, 0),
-    targetedColor = Color3.fromRGB(0, 255, 0),
-    
-    -- Visual
-    xray = false,
-    fullBright = false,
-    nightVision = false,
-    noShadows = false,
-    noBloom = false,
-    noSunRays = false,
-    rainbowLighting = false,
-    noFog = false
+
+    aim2Fov = 300, aim2Smoothing = 0.15, aim2Prediction = 0.065,
+    aim2WallCheck = false, aim2TeamCheck = false, aim2Mode = "Hold",
+    aim2Key = Enum.KeyCode.One, aim2ListeningForBind = false,
+    aim2ShowFovCircle = true, aim2MaxDistance = 0, aim2PrioritizeClose = true,
+    aim2Mode360 = false, aim2HeightOffset = 3,
+    aim2FovColor = Color3.fromRGB(255, 165, 0), aim2TargetedColor = Color3.fromRGB(255, 255, 0),
+    aim2RainbowFov = false,
+
+    xray = false, fullBright = false, nightVision = false,
+    noShadows = false, noBloom = false, noSunRays = false,
+    rainbowLighting = false, noFog = false
 }
 
--- Оригинальные значения Lighting
+local silentAim = {
+    Enabled = false, MasterEnabled = false, Mode = "Hold",
+    HoldKey = Enum.KeyCode.BackSlash, ListeningForBind = false,
+    Prediction = 0.187, FOV = 500, TargetPart = "HumanoidRootPart",
+    ShowFovCircle = true, MaxDistance = 0, PrioritizeClose = true, Mode360 = false,
+    FovColor = Color3.fromRGB(100, 200, 255), CachedTarget = nil, CachedCFrame = nil,
+    Logging = false
+}
+
+local markerClick = {
+    Enabled = false, ModifierKey = Enum.KeyCode.Backquote,
+    ListeningForBind = false, Debug = false, HeightOffset = 3
+}
+
+local ESP = {
+    Enabled = false, Visible = false, Range = math.huge, UpdateRate = 0.2,
+    Font = Enum.Font.GothamBold, Size = 1.0,
+    ShowName = true, ShowHP = true, ShowMD = true, ShowDodge = true,
+    NameColor = Color3.fromRGB(255, 255, 255),
+    HPColor = Color3.fromRGB(0, 255, 0),
+    MDColor = Color3.fromRGB(200, 100, 255),
+    DodgeOnColor = Color3.fromRGB(0, 255, 0),
+    DodgeCDColor = Color3.fromRGB(255, 60, 60),
+    Whitelist = {},
+}
+
+local colors = { RainbowSkin = false, RainbowHair = false, SkinSpeed = 0.5, HairSpeed = 0.5, Invert = true }
+local skinTimer, hairTimer = 0, 0
+
 local originalLighting = {
-    Ambient = Lighting.Ambient,
-    OutdoorAmbient = Lighting.OutdoorAmbient,
-    Brightness = Lighting.Brightness,
-    ClockTime = Lighting.ClockTime,
-    FogEnd = Lighting.FogEnd,
-    FogStart = Lighting.FogStart,
+    Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient,
+    Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime,
+    FogEnd = Lighting.FogEnd, FogStart = Lighting.FogStart,
     GlobalShadows = Lighting.GlobalShadows
 }
 
--- Переменные
-local aimbotEnabled = false
-local aiming = false
-local currentTarget = nil
-local menuVisible = true
-local lastTargetUpdate = 0
-local targetUpdateInterval = 0.05
+local aimbotEnabled, aiming, currentTarget = false, false, nil
+local aim2Enabled, aim2ing, aim2Target = false, false, nil
+local lastTargetUpdate, lastTarget2Update = 0, 0
+local hue, lightingHue = 0, 0
+local rainbowSpeed = 0.005
 
 local ALL_BODY_PARTS = {
     "Head", "HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso",
@@ -113,50 +261,114 @@ local ALL_BODY_PARTS = {
     "LeftHand", "RightHand", "LeftFoot", "RightFoot"
 }
 
-local hue = 0
-local rainbowSpeed = 0.005
-local lightingHue = 0
-
--- FOV круг
-local fovCircle
+local fovCircle, fovCircle2, silentFovCircle
 pcall(function()
     fovCircle = Drawing.new("Circle")
-    fovCircle.Thickness = 2
-    fovCircle.Radius = settings.fov
-    fovCircle.Filled = false
-    fovCircle.Color = settings.fovColor
-    fovCircle.Transparency = 1
-    fovCircle.Visible = false
+    fovCircle.Thickness = 2; fovCircle.Radius = settings.fov
+    fovCircle.Filled = false; fovCircle.Color = settings.fovColor
+    fovCircle.Transparency = 1; fovCircle.Visible = false
+end)
+pcall(function()
+    fovCircle2 = Drawing.new("Circle")
+    fovCircle2.Thickness = 2; fovCircle2.Radius = settings.aim2Fov
+    fovCircle2.Filled = false; fovCircle2.Color = settings.aim2FovColor
+    fovCircle2.Transparency = 1; fovCircle2.Visible = false
+end)
+pcall(function()
+    silentFovCircle = Drawing.new("Circle")
+    silentFovCircle.Thickness = 2; silentFovCircle.Radius = silentAim.FOV
+    silentFovCircle.Filled = false; silentFovCircle.Color = silentAim.FovColor
+    silentFovCircle.Transparency = 1; silentFovCircle.Visible = false
 end)
 
---> [< ВИЗУАЛЬНЫЕ ФУНКЦИИ >] <--
+pcall(function()
+    getgenv().Flumium_Drawing_Fov1 = fovCircle
+    getgenv().Flumium_Drawing_Fov2 = fovCircle2
+    getgenv().Flumium_Drawing_FovS = silentFovCircle
+end)
 
-local function setXRay(enabled)
-    settings.xray = enabled
+--> [< ПИНГ / РЕГИОН >] <--
+local function getPlayerPing()
+    local ok, ping = pcall(function() return LocalPlayer:GetNetworkPing() end)
+    return ok and ping and math.floor(ping * 1000) or 0
+end
+
+local __serverLocCache = nil
+local function getServerLocation(force)
+    if __serverLocCache and not force then return __serverLocCache end
+    local ok, resp = pcall(function()
+        return game:HttpGet("http://ip-api.com/json/?fields=status,country,countryCode,regionName,city,isp,org,lat,lon,query,timezone", true)
+    end)
+    if not ok or type(resp) ~= "string" or resp == "" then
+        return { status = "fail", err = "http failed" }
+    end
+    local ok2, data = pcall(function() return HttpService:JSONDecode(resp) end)
+    if not ok2 or type(data) ~= "table" then
+        return { status = "fail", err = "parse failed" }
+    end
+    __serverLocCache = data
+    return data
+end
+
+local function getClientCountry()
+    local ok, code = pcall(function()
+        return LocalizationService:GetCountryRegionForPlayerAsync(LocalPlayer)
+    end)
+    if ok and code and code ~= "" then return tostring(code) end
+    return "??"
+end
+
+local function haversine(lat1, lon1, lat2, lon2)
+    local R = 6371
+    local dLat = math.rad(lat2 - lat1)
+    local dLon = math.rad(lon2 - lon1)
+    local a = math.sin(dLat/2)^2 + math.cos(math.rad(lat1)) * math.cos(math.rad(lat2)) * math.sin(dLon/2)^2
+    return math.floor(R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a)))
+end
+
+local COUNTRY_COORDS = {
+    US = {38, -97}, CA = {60, -95}, MX = {23, -102},
+    GB = {54, -2}, DE = {51, 10}, FR = {46, 2}, NL = {52, 5},
+    PL = {52, 20}, ES = {40, -4}, IT = {42, 12}, SE = {60, 15},
+    NO = {62, 10}, FI = {64, 26}, RU = {60, 100}, UA = {49, 32},
+    TR = {39, 35}, JP = {36, 138}, KR = {36, 128}, CN = {35, 105},
+    SG = {1, 103}, IN = {20, 77}, AU = {-25, 134}, BR = {-10, -55},
+    AR = {-34, -64}, ZA = {-29, 24}, AE = {24, 54}, SA = {24, 45},
+    ID = {-5, 120}, TH = {15, 100}, VN = {14, 108}, PH = {13, 122},
+    MY = {4, 102}, HK = {22, 114}, TW = {24, 121}, NZ = {-41, 174},
+}
+
+local function getClientCoords()
+    local cc = getClientCountry()
+    if cc and COUNTRY_COORDS[cc] then
+        return COUNTRY_COORDS[cc][1], COUNTRY_COORDS[cc][2], cc
+    end
+    return nil, nil, cc
+end
+
+--> [< ВИЗУАЛЬНЫЕ >] <--
+local function setXRay(v)
+    settings.xray = v
     pcall(function()
-        for _, obj in ipairs(workspace:GetDescendants()) do
+        for _, obj in ipairs(Workspace:GetDescendants()) do
             if obj:IsA("BasePart") then
-                if enabled then
-                    if not obj:GetAttribute("OrigTransparency") then
-                        obj:SetAttribute("OrigTransparency", obj.Transparency)
-                    end
+                if v then
+                    if not obj:GetAttribute("OT") then obj:SetAttribute("OT", obj.Transparency) end
                     obj.LocalTransparencyModifier = 0.5
                 else
-                    local orig = obj:GetAttribute("OrigTransparency")
-                    if orig then obj.LocalTransparencyModifier = orig end
+                    local o = obj:GetAttribute("OT")
+                    if o then obj.LocalTransparencyModifier = o end
                 end
             end
         end
     end)
 end
-
-local function setFullBright(enabled)
-    settings.fullBright = enabled
-    if enabled then
-        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-        Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-        Lighting.Brightness = 3
-        Lighting.ClockTime = 12
+local function setFullBright(v)
+    settings.fullBright = v
+    if v then
+        Lighting.Ambient = Color3.fromRGB(255,255,255)
+        Lighting.OutdoorAmbient = Color3.fromRGB(255,255,255)
+        Lighting.Brightness = 3; Lighting.ClockTime = 12
     else
         Lighting.Ambient = originalLighting.Ambient
         Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
@@ -164,908 +376,1756 @@ local function setFullBright(enabled)
         Lighting.ClockTime = originalLighting.ClockTime
     end
 end
-
-local function setNightVision(enabled)
-    settings.nightVision = enabled
+local function setNightVision(v)
+    settings.nightVision = v
     pcall(function()
-        if enabled then
-            local nv = Lighting:FindFirstChild("NVEffect")
+        local nv = Lighting:FindFirstChild("NVEffect")
+        if v then
             if not nv then
                 nv = Instance.new("ColorCorrectionEffect")
-                nv.Name = "NVEffect"
-                nv.Brightness = 0.3
-                nv.Contrast = 0.5
-                nv.Saturation = -0.5
-                nv.TintColor = Color3.fromRGB(0, 255, 0)
+                nv.Name = "NVEffect"; nv.Brightness = 0.3; nv.Contrast = 0.5
+                nv.Saturation = -0.5; nv.TintColor = Color3.fromRGB(0,255,0)
                 nv.Parent = Lighting
             end
             nv.Enabled = true
-        else
-            local nv = Lighting:FindFirstChild("NVEffect")
-            if nv then nv.Enabled = false end
-        end
+        elseif nv then nv.Enabled = false end
     end)
 end
-
-local function setNoShadows(enabled)
-    settings.noShadows = enabled
-    Lighting.GlobalShadows = not enabled
-end
-
-local function setNoBloom(enabled)
-    settings.noBloom = enabled
+local function setNoShadows(v) settings.noShadows = v; Lighting.GlobalShadows = not v end
+local function setNoBloom(v)
+    settings.noBloom = v
     pcall(function()
-        for _, effect in ipairs(Lighting:GetChildren()) do
-            if effect:IsA("BloomEffect") then
-                effect.Enabled = not enabled
-            end
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("BloomEffect") then e.Enabled = not v end
         end
     end)
 end
-
-local function setNoSunRays(enabled)
-    settings.noSunRays = enabled
+local function setNoSunRays(v)
+    settings.noSunRays = v
     pcall(function()
-        for _, effect in ipairs(Lighting:GetChildren()) do
-            if effect:IsA("SunRaysEffect") then
-                effect.Enabled = not enabled
-            end
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("SunRaysEffect") then e.Enabled = not v end
         end
     end)
 end
-
-local function setRainbowLighting(enabled)
-    settings.rainbowLighting = enabled
-    if not enabled then
+local function setRainbowLighting(v)
+    settings.rainbowLighting = v
+    if not v then
         Lighting.Ambient = originalLighting.Ambient
         Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
     end
 end
-
-local function setNoFog(enabled)
-    settings.noFog = enabled
-    if enabled then
-        Lighting.FogEnd = 100000
-        Lighting.FogStart = 100000
+local function setNoFog(v)
+    settings.noFog = v
+    if v then
+        Lighting.FogEnd = 100000; Lighting.FogStart = 100000
     else
         Lighting.FogEnd = originalLighting.FogEnd
         Lighting.FogStart = originalLighting.FogStart
     end
 end
 
---> [< СИСТЕМА КОНФИГОВ >] <--
+--> [< LOW DETAIL MODE + FPS UNLOCKER >] <--
+local lowDetailState = {
+    Enabled = false,
+    RemoveTextures = true, RemoveDecals = true, RemoveParticles = true,
+    RemoveShadows = true, PlasticMaterial = true,
+    DisablePostFX = true, FogDistance = true, WaterOptimize = true,
+    FpsUnlocked = false, FpsCap = 240,
+    ModifiedParts = {}, ModifiedDecals = {}, ModifiedTextures = {}, ModifiedParticles = {},
+    DescConn = nil,
+}
 
-local function collectSettings()
-    return {
-        fov = settings.fov,
-        smoothing = settings.smoothing,
-        prediction = settings.prediction,
-        wallCheck = settings.wallCheck,
-        stickyAim = settings.stickyAim,
-        teamCheck = settings.teamCheck,
-        healthCheck = settings.healthCheck,
-        minHealth = settings.minHealth,
-        aimPart = settings.aimPart,
-        aimMode = settings.aimMode,
-        key = settings.key,
-        showFovCircle = settings.showFovCircle,
-        maxDistance = settings.maxDistance,
-        prioritizeClose = settings.prioritizeClose,
-        rainbowFov = settings.rainbowFov,
-        fovColor = {R = settings.fovColor.R, G = settings.fovColor.G, B = settings.fovColor.B},
-        targetedColor = {R = settings.targetedColor.R, G = settings.targetedColor.G, B = settings.targetedColor.B},
-        xray = settings.xray,
-        fullBright = settings.fullBright,
-        nightVision = settings.nightVision,
-        noShadows = settings.noShadows,
-        noBloom = settings.noBloom,
-        noSunRays = settings.noSunRays,
-        rainbowLighting = settings.rainbowLighting,
-        noFog = settings.noFog
-    }
-end
-
-local function applySettings(data)
-    if not data then return false end
-    
-    settings.fov = data.fov or settings.fov
-    settings.smoothing = data.smoothing or settings.smoothing
-    settings.prediction = data.prediction or settings.prediction
-    settings.wallCheck = data.wallCheck ~= nil and data.wallCheck or settings.wallCheck
-    settings.stickyAim = data.stickyAim ~= nil and data.stickyAim or settings.stickyAim
-    settings.teamCheck = data.teamCheck ~= nil and data.teamCheck or settings.teamCheck
-    settings.healthCheck = data.healthCheck ~= nil and data.healthCheck or settings.healthCheck
-    settings.minHealth = data.minHealth or settings.minHealth
-    settings.aimPart = data.aimPart or settings.aimPart
-    settings.aimMode = data.aimMode or settings.aimMode
-    settings.key = data.key or settings.key
-    settings.showFovCircle = data.showFovCircle ~= nil and data.showFovCircle or settings.showFovCircle
-    settings.maxDistance = data.maxDistance or settings.maxDistance
-    settings.prioritizeClose = data.prioritizeClose ~= nil and data.prioritizeClose or settings.prioritizeClose
-    settings.rainbowFov = data.rainbowFov ~= nil and data.rainbowFov or settings.rainbowFov
-    
-    if data.fovColor then
-        settings.fovColor = Color3.new(data.fovColor.R, data.fovColor.G, data.fovColor.B)
-        if fovCircle and not settings.rainbowFov then
-            fovCircle.Color = settings.fovColor
-        end
-    end
-    
-    if data.targetedColor then
-        settings.targetedColor = Color3.new(data.targetedColor.R, data.targetedColor.G, data.targetedColor.B)
-    end
-    
-    if fovCircle then
-        fovCircle.Radius = settings.fov
-    end
-    
-    setXRay(data.xray or false)
-    setFullBright(data.fullBright or false)
-    setNightVision(data.nightVision or false)
-    setNoShadows(data.noShadows or false)
-    setNoBloom(data.noBloom or false)
-    setNoSunRays(data.noSunRays or false)
-    setRainbowLighting(data.rainbowLighting or false)
-    setNoFog(data.noFog or false)
-    
-    return true
-end
-
-local function saveConfig(name)
-    if not name or name == "" then
-        Rayfield:Notify({Title = "❌ Ошибка", Content = "Введите название конфига", Duration = 3})
-        return false
-    end
-    
-    name = tostring(name):gsub("[^%w_%-%. ]", "")
-    if name == "" then
-        Rayfield:Notify({Title = "❌ Ошибка", Content = "Недопустимое название", Duration = 3})
-        return false
-    end
-    
-    local success, result = pcall(function()
-        ensureFolders()
-        local data = collectSettings()
-        local json = HttpService:JSONEncode(data)
-        local path = CONFIGS_FOLDER .. "/" .. name .. ".json"
-        writefile(path, json)
-        return path
-    end)
-    
-    if success then
-        Rayfield:Notify({Title = "💾 Конфиг сохранён", Content = name .. ".json", Duration = 3})
-        print("✅ Сохранён: " .. result)
-        return true
-    else
-        Rayfield:Notify({Title = "❌ Ошибка", Content = tostring(result), Duration = 4})
-        return false
-    end
-end
-
-local function loadConfig(name)
-    if not name or name == "" or name == "Нет конфигов" then
-        Rayfield:Notify({Title = "❌ Ошибка", Content = "Выберите конфиг", Duration = 3})
-        return false
-    end
-    
-    local success, result = pcall(function()
-        local path = CONFIGS_FOLDER .. "/" .. name .. ".json"
-        if not isfile(path) then
-            error("Файл не найден")
-        end
-        
-        local json = readfile(path)
-        local data = HttpService:JSONDecode(json)
-        applySettings(data)
-        return name
-    end)
-    
-    if success then
-        Rayfield:Notify({Title = "📂 Загружено", Content = "Конфиг: " .. result, Duration = 3})
-        print("✅ Загружен: " .. result)
-        return true
-    else
-        Rayfield:Notify({Title = "❌ Ошибка", Content = tostring(result), Duration = 4})
-        return false
-    end
-end
-
-local function deleteConfig(name)
-    if not name or name == "" or name == "Нет конфигов" then return false end
-    
-    local success = pcall(function()
-        local path = CONFIGS_FOLDER .. "/" .. name .. ".json"
-        if isfile(path) then
-            delfile(path)
-        end
-    end)
-    
-    if success then
-        Rayfield:Notify({Title = "🗑️ Удалён", Content = name, Duration = 2})
-        return true
-    end
-    return false
-end
-
-local function getConfigList()
-    local configs = {}
+local function applyLowDetailToObject(obj)
+    if not lowDetailState.Enabled then return end
     pcall(function()
-        ensureFolders()
-        local files = listfiles(CONFIGS_FOLDER)
-        for _, file in ipairs(files) do
-            local name = file:match("([^/\\]+)%.json$")
-            if name then
-                table.insert(configs, name)
+        if obj:IsA("BasePart") then
+            if lowDetailState.PlasticMaterial and obj.Material ~= Enum.Material.Plastic then
+                table.insert(lowDetailState.ModifiedParts, {obj = obj, prop = "Material", value = obj.Material})
+                obj.Material = Enum.Material.Plastic
+            end
+            if lowDetailState.RemoveShadows and obj.CastShadow then
+                table.insert(lowDetailState.ModifiedParts, {obj = obj, prop = "CastShadow", value = true})
+                obj.CastShadow = false
+            end
+        elseif obj:IsA("Decal") and lowDetailState.RemoveDecals then
+            table.insert(lowDetailState.ModifiedDecals, {obj = obj, value = obj.Transparency})
+            obj.Transparency = 1
+        elseif obj:IsA("Texture") and lowDetailState.RemoveTextures then
+            table.insert(lowDetailState.ModifiedTextures, {obj = obj, value = obj.Transparency})
+            obj.Transparency = 1
+        elseif (obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") or obj:IsA("Beam")) and lowDetailState.RemoveParticles then
+            table.insert(lowDetailState.ModifiedParticles, {obj = obj, value = obj.Enabled})
+            obj.Enabled = false
+        end
+    end)
+end
+
+local function applyLowDetailAll()
+    if not lowDetailState.Enabled then return end
+    task.spawn(function()
+        local count = 0
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            applyLowDetailToObject(obj)
+            count += 1
+            if count % 500 == 0 then task.wait() end
+        end
+    end)
+    pcall(function()
+        if lowDetailState.DisablePostFX then
+            for _, e in ipairs(Lighting:GetChildren()) do
+                if e:IsA("PostEffect") then e.Enabled = false end
+            end
+        end
+        if lowDetailState.FogDistance then
+            Lighting.FogEnd = 1e9; Lighting.FogStart = 0
+        end
+        Lighting.GlobalShadows = false
+    end)
+    pcall(function()
+        if lowDetailState.WaterOptimize then
+            local terrain = Workspace:FindFirstChildOfClass("Terrain")
+            if terrain then
+                terrain.WaterWaveSize = 0
+                terrain.WaterWaveSpeed = 0
+                terrain.WaterReflectance = 0
+                terrain.WaterTransparency = 1
             end
         end
     end)
-    if #configs == 0 then
-        table.insert(configs, "Нет конфигов")
+end
+
+local function restoreLowDetail()
+    for _, entry in ipairs(lowDetailState.ModifiedParts) do
+        pcall(function() if entry.obj and entry.obj.Parent then entry.obj[entry.prop] = entry.value end end)
     end
-    return configs
-end
-
---> [< AUTOEXEC >] <--
-
-local function saveAutoExec(configName, autoLoad)
-    pcall(function()
-        ensureFolders()
-        local data = {
-            lastConfig = configName or "",
-            autoLoad = autoLoad or false
-        }
-        writefile(AUTOEXEC_FILE, HttpService:JSONEncode(data))
-    end)
-end
-
-local function loadAutoExec()
-    local data = {lastConfig = "", autoLoad = false}
-    pcall(function()
-        if isfile(AUTOEXEC_FILE) then
-            local json = readfile(AUTOEXEC_FILE)
-            data = HttpService:JSONDecode(json)
-        end
-    end)
-    return data
-end
-
---> [< ФУНКЦИИ АИМБОТА >] <--
-
-local function closeScript()
-    pcall(function()
-        if fovCircle then
-            fovCircle.Visible = false
-            fovCircle:Remove()
-        end
-    end)
-    pcall(function()
-        if Window then Window:Destroy() end
-    end)
-    getgenv().UniversalAimbotLoaded = false
-    error("Script closed")
-end
-
-local function toggleMenu()
-    menuVisible = not menuVisible
-    if menuVisible then Window:Show() else Window:Hide() end
-end
-
-local function getBestAimPart(character)
-    if not character then return nil end
-    
-    if settings.aimPart and settings.aimPart ~= "Auto" then
-        local part = character:FindFirstChild(settings.aimPart)
-        if part and part:IsA("BasePart") then return part end
-        
-        if settings.aimPart == "Torso" then
-            local ut = character:FindFirstChild("UpperTorso")
-            if ut and ut:IsA("BasePart") then return ut end
-            local lt = character:FindFirstChild("LowerTorso")
-            if lt and lt:IsA("BasePart") then return lt end
-        end
-        
-        local fallbacks = {"Head", "HumanoidRootPart", "UpperTorso", "Torso"}
-        for _, name in ipairs(fallbacks) do
-            local part = character:FindFirstChild(name)
-            if part and part:IsA("BasePart") then return part end
-        end
-        return nil
+    for _, entry in ipairs(lowDetailState.ModifiedDecals) do
+        pcall(function() if entry.obj and entry.obj.Parent then entry.obj.Transparency = entry.value end end)
     end
-    
-    local cameraPos = camera.CFrame.Position
-    local bestPart, bestDistance = nil, math.huge
-    
-    for _, partName in ipairs(ALL_BODY_PARTS) do
-        local part = character:FindFirstChild(partName)
-        if part and part:IsA("BasePart") then
-            local dist = (part.Position - cameraPos).Magnitude
-            if dist < bestDistance then
-                bestDistance = dist
-                bestPart = part
+    for _, entry in ipairs(lowDetailState.ModifiedTextures) do
+        pcall(function() if entry.obj and entry.obj.Parent then entry.obj.Transparency = entry.value end end)
+    end
+    for _, entry in ipairs(lowDetailState.ModifiedParticles) do
+        pcall(function() if entry.obj and entry.obj.Parent then entry.obj.Enabled = entry.value end end)
+    end
+    lowDetailState.ModifiedParts = {}
+    lowDetailState.ModifiedDecals = {}
+    lowDetailState.ModifiedTextures = {}
+    lowDetailState.ModifiedParticles = {}
+    pcall(function()
+        Lighting.FogEnd = originalLighting.FogEnd
+        Lighting.FogStart = originalLighting.FogStart
+        Lighting.GlobalShadows = originalLighting.GlobalShadows
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("PostEffect") then e.Enabled = true end
+        end
+    end)
+    pcall(function()
+        local terrain = Workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
+            terrain.WaterWaveSize = 0.15
+            terrain.WaterWaveSpeed = 10
+            terrain.WaterReflectance = 0
+            terrain.WaterTransparency = 0.2
+        end
+    end)
+end
+
+local function fastDeactivateLowDetail()
+    if lowDetailState.Enabled then
+        lowDetailState.Enabled = false
+        if lowDetailState.DescConn then
+            pcall(function() lowDetailState.DescConn:Disconnect() end)
+            lowDetailState.DescConn = nil
+        end
+        pcall(function()
+            Lighting.FogEnd = originalLighting.FogEnd
+            Lighting.FogStart = originalLighting.FogStart
+            Lighting.GlobalShadows = originalLighting.GlobalShadows
+            for _, e in ipairs(Lighting:GetChildren()) do
+                if e:IsA("PostEffect") then e.Enabled = true end
+            end
+        end)
+        pcall(function()
+            local terrain = Workspace:FindFirstChildOfClass("Terrain")
+            if terrain then
+                terrain.WaterWaveSize = 0.15
+                terrain.WaterWaveSpeed = 10
+                terrain.WaterReflectance = 0
+                terrain.WaterTransparency = 0.2
+            end
+        end)
+        lowDetailState.ModifiedParts = {}
+        lowDetailState.ModifiedDecals = {}
+        lowDetailState.ModifiedTextures = {}
+        lowDetailState.ModifiedParticles = {}
+    end
+    if lowDetailState.FpsUnlocked then
+        lowDetailState.FpsUnlocked = false
+        if type(setfpscap) == "function" then pcall(function() setfpscap(60) end) end
+    end
+end
+
+local function startLowDetailWatcher()
+    if lowDetailState.DescConn then return end
+    lowDetailState.DescConn = __regConn(Workspace.DescendantAdded:Connect(function(obj)
+        if lowDetailState.Enabled then
+            task.defer(function() applyLowDetailToObject(obj) end)
+        end
+    end))
+end
+local function stopLowDetailWatcher()
+    if lowDetailState.DescConn then
+        pcall(function() lowDetailState.DescConn:Disconnect() end)
+        lowDetailState.DescConn = nil
+    end
+end
+
+local function setLowDetail(enabled)
+    lowDetailState.Enabled = enabled
+    if enabled then
+        applyLowDetailAll()
+        startLowDetailWatcher()
+    else
+        stopLowDetailWatcher()
+        restoreLowDetail()
+    end
+end
+
+local function setFpsCap(cap)
+    if type(setfpscap) == "function" then
+        pcall(function() setfpscap(cap) end)
+        return true
+    end
+    local ok = pcall(function() settings().Rendering.FramerateCap = cap end)
+    return ok
+end
+local function unlockFps(cap)
+    if lowDetailState.FpsUnlocked then return end
+    lowDetailState.FpsUnlocked = true
+    lowDetailState.FpsCap = cap
+    setFpsCap(cap)
+end
+local function relockFps()
+    if not lowDetailState.FpsUnlocked then return end
+    lowDetailState.FpsUnlocked = false
+    setFpsCap(60)
+end
+
+--> [< ESP >] <--
+local espData, espConns, espAcc = {}, {}, 0
+
+local function getRoot(char)
+    return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"))
+end
+local function getHumanoid(char) return char and char:FindFirstChildOfClass("Humanoid") end
+local function short(v)
+    v = math.floor(tonumber(v) or 0)
+    if v >= 1e6 then return string.format("%.1fM", v/1e6) end
+    if v >= 1e3 then return string.format("%.1fK", v/1e3) end
+    return tostring(v)
+end
+local function isWhitelisted(p)
+    local hasAny = false
+    for _ in pairs(ESP.Whitelist) do hasAny = true; break end
+    if not hasAny then return true end
+    return ESP.Whitelist[p.Name] == true
+end
+local function getModeValue(p)
+    local char = workspace:FindFirstChild(p.Name)
+    if char then
+        local combat = char:FindFirstChild("combat")
+        if combat then
+            local mode = combat:FindFirstChild("mode")
+            if mode then
+                if mode:IsA("IntValue") or mode:IsA("NumberValue") then return mode.Value
+                elseif mode:IsA("StringValue") then return tonumber(mode.Value) or 0 end
             end
         end
     end
-    
-    if not bestPart then
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("BasePart") and child.Name ~= "HumanoidRootPart" then
-                local dist = (child.Position - cameraPos).Magnitude
-                if dist < bestDistance then
-                    bestDistance = dist
-                    bestPart = child
+    return 0
+end
+local function getTaijutsuDodgeInfo(p)
+    local keys = p:FindFirstChild("statz") and p.statz:FindFirstChild("keys")
+    if not keys then return nil end
+    for _, slot in ipairs(keys:GetChildren()) do
+        if slot:IsA("ValueBase") then
+            local nm = string.lower(tostring(slot.Value))
+            if nm == "taijutsudodge" then
+                local cdObj = slot:FindFirstChild("cooldown")
+                if cdObj then
+                    local cd = tonumber(cdObj.Value) or 0
+                    return cd > 0 and {ready = false, cd = math.floor(cd)} or {ready = true, cd = 0}
+                else
+                    return {ready = true, cd = 0}
                 end
             end
         end
     end
-    
-    return bestPart
+    return nil
 end
-
-local function isSameTeam(player)
-    if not settings.teamCheck then return false end
-    if not player.Team or not plr.Team then return false end
-    return player.Team == plr.Team
+local function clearPlayer(p)
+    local d = espData[p]
+    if d and d.gui then pcall(function() d.gui:Destroy() end) end
+    espData[p] = nil
 end
-
-local function isVisible(targetCharacter)
-    if not settings.wallCheck then return true end
-    local targetPart = getBestAimPart(targetCharacter)
-    if not targetPart then return false end
-    
-    local origin = camera.CFrame.Position
-    local direction = (targetPart.Position - origin).unit * 500
-    
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {plr.Character, targetCharacter}
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local result = workspace:Raycast(origin, direction, params)
-    return not result or result.Instance:IsDescendantOf(targetCharacter)
+local function makeLabel(parent, size, pos, color, textSize)
+    local t = Instance.new("TextLabel")
+    t.Size = size; t.Position = pos; t.BackgroundTransparency = 1
+    t.TextColor3 = color; t.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+    t.TextStrokeTransparency = 0.3; t.Font = ESP.Font
+    t.TextSize = textSize or 16
+    t.TextXAlignment = Enum.TextXAlignment.Center
+    t.TextYAlignment = Enum.TextYAlignment.Center
+    t.Parent = parent
+    return t
 end
+local function createPlayerESP(p, char)
+    if p == LocalPlayer then return end
+    if not isWhitelisted(p) then return end
+    if espData[p] and espData[p].gui and espData[p].gui.Parent then return end
+    local head = char:FindFirstChild("Head") or getRoot(char)
+    local hum = getHumanoid(char)
+    if not head or not hum then return end
 
-local function getTarget()
-    local bestTarget, bestScore = nil, math.huge
-    local cameraPos = camera.CFrame.Position
-    local mousePos = Vector2.new(mouse.X, mouse.Y)
-    
-    for _, player in ipairs(players:GetPlayers()) do
-        if player == plr then continue end
-        if isSameTeam(player) then continue end
-        
-        local character = player.Character
-        if not character then continue end
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then continue end
-        if settings.healthCheck and humanoid.Health < settings.minHealth then continue end
-        
-        local targetPart = getBestAimPart(character)
-        if not targetPart then continue end
-        
-        if settings.maxDistance > 0 then
-            local rootPart = character:FindFirstChild("HumanoidRootPart")
-            if rootPart and (rootPart.Position - cameraPos).Magnitude > settings.maxDistance then
-                continue
-            end
+    local gui = Instance.new("BillboardGui")
+    gui.Name = "SimpleESP"; gui.Size = UDim2.new(0, 200, 0, 90)
+    gui.StudsOffset = Vector3.new(0, 3, 0); gui.AlwaysOnTop = true
+    gui.ResetOnSpawn = false; gui.Adornee = head; gui.MaxDistance = ESP.Range
+    gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+    local holder = Instance.new("Frame", gui)
+    holder.Size = UDim2.fromScale(1, 1); holder.BackgroundTransparency = 1
+    local scale = Instance.new("UIScale", holder); scale.Scale = ESP.Size
+
+    local nameLabel = makeLabel(holder, UDim2.new(1,0,0,20), UDim2.new(0,0,0,0), ESP.NameColor, 16)
+    nameLabel.Text = p.Name
+    local hpLabel = makeLabel(holder, UDim2.new(1,0,0,18), UDim2.new(0,0,0,22), ESP.HPColor, 16)
+    hpLabel.Text = "HP: 0"
+    local mdLabel = makeLabel(holder, UDim2.new(1,0,0,18), UDim2.new(0,0,0,42), ESP.MDColor, 16)
+    mdLabel.Text = "MD: 0"
+    local dodgeLabel = makeLabel(holder, UDim2.new(1,0,0,18), UDim2.new(0,0,0,62), ESP.DodgeOnColor, 16)
+    dodgeLabel.Text = "DODGE: --"
+
+    espData[p] = {
+        gui=gui, char=char, head=head, hum=hum,
+        nameLabel=nameLabel, hpLabel=hpLabel, mdLabel=mdLabel, dodgeLabel=dodgeLabel,
+        hp=-1, md=-1, dodgeState=-1,
+    }
+end
+local function updateESP()
+    if not ESP.Enabled or not ESP.Visible then return end
+    for p, d in pairs(espData) do
+        if not p.Parent or not d.char or not d.char.Parent then clearPlayer(p); continue end
+        if not isWhitelisted(p) then if d.gui then d.gui.Enabled = false end; continue end
+        if not d.head or not d.head.Parent then
+            d.head = d.char:FindFirstChild("Head") or getRoot(d.char)
+            if d.gui then d.gui.Adornee = d.head end
         end
-        
-        if not isVisible(character) then continue end
-        
-        local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
-        if not onScreen then continue end
-        
-        local cursorDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-        if cursorDist > settings.fov then continue end
-        
-        local distance = (targetPart.Position - cameraPos).Magnitude
-        local score = settings.prioritizeClose
-            and ((distance * 0.7) + (cursorDist * 0.3))
-            or ((cursorDist * 0.7) + (distance * 0.3))
-        
-        if score < bestScore then
-            bestScore = score
-            bestTarget = player
+        if not d.hum or not d.hum.Parent then d.hum = getHumanoid(d.char) end
+        if not d.gui or not d.head or not d.hum or d.hum.Health <= 0 then
+            if d.gui then d.gui.Enabled = false end; continue
+        end
+        d.gui.Enabled = true; d.gui.Adornee = d.head
+        if ESP.ShowName then d.nameLabel.Visible = true; d.nameLabel.Text = p.Name
+        else d.nameLabel.Visible = false end
+        local hp = math.floor(d.hum.Health)
+        if d.hp ~= hp then d.hp = hp; d.hpLabel.Text = "HP: " .. short(hp) end
+        d.hpLabel.Visible = ESP.ShowHP; d.hpLabel.TextColor3 = ESP.HPColor
+        local md = math.floor(getModeValue(p))
+        if d.md ~= md then d.md = md; d.mdLabel.Text = "MD: " .. md end
+        d.mdLabel.Visible = ESP.ShowMD; d.mdLabel.TextColor3 = ESP.MDColor
+        if ESP.ShowDodge then
+            local di = getTaijutsuDodgeInfo(p)
+            if di then
+                if di.ready then
+                    if d.dodgeState ~= 1 then
+                        d.dodgeState = 1
+                        d.dodgeLabel.Text = "BODY DODGE: ON"
+                        d.dodgeLabel.TextColor3 = ESP.DodgeOnColor
+                    end
+                else
+                    if d.dodgeState ~= di.cd then
+                        d.dodgeState = di.cd
+                        d.dodgeLabel.Text = "BODY DODGE: " .. di.cd
+                        d.dodgeLabel.TextColor3 = ESP.DodgeCDColor
+                    end
+                end
+                d.dodgeLabel.Visible = true
+            else d.dodgeLabel.Visible = false end
+        else d.dodgeLabel.Visible = false end
+    end
+end
+local function rebuildESP()
+    for p in pairs(espData) do clearPlayer(p) end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and isWhitelisted(p) then
+            task.spawn(createPlayerESP, p, p.Character)
         end
     end
-    
-    return bestTarget
 end
-
-local function getPredictedPosition(player)
-    if not player or not player.Character then return nil end
-    local targetPart = getBestAimPart(player.Character)
-    if not targetPart then return nil end
-    
-    local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return targetPart.Position end
-    
-    return targetPart.Position + (rootPart.Velocity * settings.prediction)
+local function espWatch(p)
+    if p == LocalPlayer then return end
+    if espConns[p] then for _, c in ipairs(espConns[p]) do pcall(function() c:Disconnect() end) end end
+    espConns[p] = {}
+    table.insert(espConns[p], __regConn(p.CharacterAdded:Connect(function(char)
+        if ESP.Enabled and ESP.Visible and isWhitelisted(p) then
+            task.defer(function() createPlayerESP(p, char) end)
+        end
+    end)))
+    table.insert(espConns[p], __regConn(p.CharacterRemoving:Connect(function() clearPlayer(p) end)))
+    if p.Character and ESP.Enabled and ESP.Visible and isWhitelisted(p) then
+        task.defer(function() createPlayerESP(p, p.Character) end)
+    end
 end
+for _, p in ipairs(Players:GetPlayers()) do espWatch(p) end
+__regConn(Players.PlayerAdded:Connect(espWatch))
+__regConn(Players.PlayerRemoving:Connect(function(p) clearPlayer(p) end))
+__regConn(RunService.Heartbeat:Connect(function(dt)
+    if not ESP.Enabled or not ESP.Visible then return end
+    espAcc += dt
+    if espAcc >= ESP.UpdateRate then espAcc = 0; updateESP() end
+end))
 
-local function smoothAim(targetPosition)
-    local currentCFrame = camera.CFrame
-    local targetCFrame = CFrame.new(currentCFrame.Position, targetPosition)
-    local lerpFactor = math.clamp(1 - settings.smoothing, 0.05, 1)
-    camera.CFrame = currentCFrame:Lerp(targetCFrame, lerpFactor)
+--> [< KUNAI MARKER >] <--
+local savedEnemyPos = nil
+local function getPriorityEnemy()
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    local myPos = myRoot.Position
+    local best, bestScore = nil, math.huge
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LocalPlayer then continue end
+        if settings.teamCheck and p.Team == LocalPlayer.Team then continue end
+        local char = p.Character
+        if not char then continue end
+        local hum = char:FindFirstChild("Humanoid")
+        if not hum or hum.Health <= 0 then continue end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local head = char:FindFirstChild("Head")
+        local aimPos
+        if head then aimPos = head.Position + Vector3.new(0, markerClick.HeightOffset, 0)
+        elseif root then aimPos = root.Position + Vector3.new(0, markerClick.HeightOffset + 2, 0)
+        else continue end
+        local worldDist = (root and root.Position or aimPos - myPos).Magnitude
+        local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
+        local screenDist = onScreen and (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude or 9999
+        local score = screenDist + (worldDist * 0.1)
+        if score < bestScore then bestScore = score; best = aimPos end
+    end
+    return best
 end
-
-local function aimAtTarget(player)
-    if not player or not player.Character then return end
-    local humanoid = player.Character:FindFirstChild("Humanoid")
-    if not humanoid or humanoid.Health <= 0 then return end
-    
-    local targetPos = getPredictedPosition(player)
-    if targetPos then smoothAim(targetPos) end
-end
-
---> [< СЕРВЕР ФУНКЦИИ >] <--
-
-local function serverHop()
-    Rayfield:Notify({Title = "🔄 Server Hop", Content = "Поиск сервера...", Duration = 3})
-    pcall(function()
-        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
-        local response = game:HttpGet(url)
-        local servers = HttpService:JSONDecode(response)
-        local available = {}
-        
-        for _, s in ipairs(servers.data) do
-            if s.playing < s.maxPlayers and s.id ~= game.JobId then
-                table.insert(available, s.id)
+local function deepLog(t, prefix, depth)
+    depth = depth or 0; prefix = prefix or ""
+    if depth > 4 then return end
+    if type(t) == "table" then
+        for k, v in pairs(t) do
+            local vt = typeof(v)
+            if vt == "Vector3" or vt == "CFrame" then
+                print(prefix .. "[" .. tostring(k) .. "] = " .. vt .. " " .. tostring(v))
+            elseif type(v) == "table" then
+                print(prefix .. "[" .. tostring(k) .. "] = table:")
+                deepLog(v, prefix .. "  ", depth + 1)
+            else
+                print(prefix .. "[" .. tostring(k) .. "] = " .. vt .. " " .. tostring(v))
             end
         end
-        
-        if #available > 0 then
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, available[math.random(1, #available)], plr)
+    end
+end
+local function replaceVectorInTable(t, newPos, depth)
+    depth = depth or 0
+    if depth > 4 then return t end
+    if typeof(t) == "Vector3" then return newPos
+    elseif typeof(t) == "CFrame" then return CFrame.new(newPos)
+    elseif type(t) == "table" then
+        for k, v in pairs(t) do
+            if typeof(v) == "Vector3" then t[k] = newPos
+            elseif typeof(v) == "CFrame" then t[k] = CFrame.new(newPos)
+            elseif type(v) == "table" then t[k] = replaceVectorInTable(v, newPos, depth + 1) end
+        end
+    end
+    return t
+end
+local function isModifierHeld()
+    if not markerClick.Enabled then return false end
+    return UserInputService:IsKeyDown(markerClick.ModifierKey)
+end
+local kunaiHook, oldKunaiNamecall, kunaiMetaT = false, nil, nil
+local disableKunaiHook
+local function enableKunaiHook()
+    if kunaiHook then return end
+    local ok, err = pcall(function()
+        kunaiMetaT = getrawmetatable(game)
+        oldKunaiNamecall = kunaiMetaT.__namecall
+        setreadonly(kunaiMetaT, false)
+        kunaiMetaT.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            local args = {...}
+            local nameLower = string.lower(tostring(self.Name))
+            local isMarkerEvent = nameLower:find("marker", 1, true) or nameLower:find("kunai", 1, true) or nameLower:find("namikaze", 1, true)
+            local isTeleportEvent = nameLower:find("teleport", 1, true)
+            if method == "FireServer" and (isMarkerEvent or isTeleportEvent) then
+                if markerClick.Debug then
+                    print("[HOOK] " .. tostring(self.Name) .. " | args: " .. #args)
+                    for i, a in ipairs(args) do
+                        print("  [" .. i .. "] = " .. typeof(a) .. " " .. tostring(a))
+                        if type(a) == "table" then deepLog(a, "     ", 0) end
+                    end
+                end
+                if isModifierHeld() then
+                    local enemyPos = getPriorityEnemy()
+                    if enemyPos then
+                        savedEnemyPos = enemyPos
+                        for i = 1, #args do
+                            if typeof(args[i]) == "Vector3" then args[i] = enemyPos
+                            elseif typeof(args[i]) == "CFrame" then args[i] = CFrame.new(enemyPos)
+                            elseif type(args[i]) == "table" then args[i] = replaceVectorInTable(args[i], enemyPos, 0) end
+                        end
+                        return oldKunaiNamecall(self, table.unpack(args))
+                    end
+                end
+            end
+            return oldKunaiNamecall(self, ...)
+        end)
+        setreadonly(kunaiMetaT, true)
+        kunaiHook = true
+        __regHook(disableKunaiHook)
+        print("[Flumium] Kunai Hook установлен")
+    end)
+    if not ok then warn("[Flumium] Kunai Hook: " .. tostring(err)) end
+end
+disableKunaiHook = function()
+    if kunaiMetaT and oldKunaiNamecall then
+        pcall(function()
+            setreadonly(kunaiMetaT, false)
+            kunaiMetaT.__namecall = oldKunaiNamecall
+            setreadonly(kunaiMetaT, true)
+        end)
+    end
+    kunaiHook = false
+end
+
+--> [< SILENT AIM >] <--
+local silentHook, oldNamecall, metaT = false, nil, nil
+local disableSilentHook
+
+__regConn(RunService.Heartbeat:Connect(function()
+    if silentAim.MasterEnabled and silentAim.Mode == "Hold" then
+        silentAim.Enabled = UserInputService:IsKeyDown(silentAim.HoldKey)
+    end
+    if not silentAim.Enabled then
+        silentAim.CachedTarget = nil; silentAim.CachedCFrame = nil; return
+    end
+    local best, bestScore = nil, math.huge
+    local cam = Workspace.CurrentCamera
+    local MousePos = cam.ViewportSize / 2
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local originPos = myRoot and myRoot.Position or cam.CFrame.Position
+    for _, p in pairs(Players:GetPlayers()) do
+        if p == LocalPlayer then continue end
+        local char = p.Character
+        if not char then continue end
+        local part = char:FindFirstChild(silentAim.TargetPart)
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not part or not hum or hum.Health <= 0 then continue end
+        local enemyRoot = char:FindFirstChild("HumanoidRootPart")
+        if silentAim.MaxDistance and silentAim.MaxDistance > 0 and enemyRoot then
+            if (enemyRoot.Position - originPos).Magnitude > silentAim.MaxDistance then continue end
+        end
+        if silentAim.Mode360 then
+            local wd = (part.Position - originPos).Magnitude
+            if wd < bestScore then bestScore = wd; best = part end
         else
-            Rayfield:Notify({Title = "❌", Content = "Нет серверов", Duration = 3})
+            local pos, vis = cam:WorldToViewportPoint(part.Position)
+            if not vis then continue end
+            local sd = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
+            if sd > silentAim.FOV then continue end
+            local wd = (part.Position - originPos).Magnitude
+            local score = silentAim.PrioritizeClose and wd or sd
+            if score < bestScore then bestScore = score; best = part end
+        end
+    end
+    silentAim.CachedTarget = best
+    if silentAim.CachedTarget and silentAim.CachedTarget.Parent then
+        local tp = silentAim.CachedTarget.Position + (silentAim.CachedTarget.Velocity * silentAim.Prediction)
+        local cp = cam.CFrame.Position
+        silentAim.CachedCFrame = CFrame.new(tp, tp + (tp - cp).Unit)
+    end
+end))
+
+local function enableSilentHook()
+    if silentHook then return end
+    local ok, err = pcall(function()
+        metaT = getrawmetatable(game)
+        oldNamecall = metaT.__namecall
+        setreadonly(metaT, false)
+        metaT.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            local args = {...}
+            if silentAim.Logging and method == "FireServer" and self.Name == "update" then
+                print("[SILENT-LOG] update: args[1]=" .. tostring(args[1]))
+            end
+            if method == "FireServer" and self.Name == "update" then
+                if args[1] == "fixmouse" and silentAim.Enabled and silentAim.CachedCFrame then
+                    args[2] = silentAim.CachedCFrame
+                    return oldNamecall(self, table.unpack(args))
+                end
+            end
+            return oldNamecall(self, ...)
+        end)
+        setreadonly(metaT, true)
+        silentHook = true
+        __regHook(disableSilentHook)
+        print("[Flumium] Silent Aim хук установлен")
+    end)
+    if not ok then warn("[Flumium] Silent Aim: " .. tostring(err)) end
+end
+disableSilentHook = function()
+    if metaT and oldNamecall then
+        pcall(function()
+            setreadonly(metaT, false)
+            metaT.__namecall = oldNamecall
+            setreadonly(metaT, true)
+        end)
+    end
+    silentHook = false
+end
+
+--> [< COLOR CHANGER >] <--
+local function prepareColor(r, g, b)
+    r = math.clamp(math.floor(r), 1, 254)
+    g = math.clamp(math.floor(g), 1, 254)
+    b = math.clamp(math.floor(b), 1, 254)
+    if colors.Invert then r = 255 - r; g = 255 - g; b = 255 - b end
+    return string.format("%d,%d,%d", r, g, b)
+end
+local function setSkinColor(r, g, b)
+    if not shindoEvent then return end
+    task.spawn(function()
+        local char = LocalPlayer.Character
+        if char then char:WaitForChild("Humanoid", 5); char:WaitForChild("Head", 5) end
+        task.wait(0.3)
+        local str = prepareColor(r, g, b)
+        for i = 1, 3 do
+            local ok = pcall(function() shindoEvent:FireServer("skin", str) end)
+            if ok then break end
+            task.wait(0.2)
+        end
+    end)
+end
+local function setHairColor(r, g, b)
+    if not shindoEvent then return end
+    task.spawn(function()
+        local char = LocalPlayer.Character
+        if char then char:WaitForChild("Humanoid", 5); char:WaitForChild("Head", 5) end
+        task.wait(0.3)
+        local str = prepareColor(r, g, b)
+        for i = 1, 3 do
+            local ok = pcall(function() shindoEvent:FireServer("haircolor", str) end)
+            if ok then break end
+            task.wait(0.2)
         end
     end)
 end
 
-local function rejoinServer()
-    Rayfield:Notify({Title = "🔁 Rejoin", Content = "Переподключение...", Duration = 3})
-    pcall(function()
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, plr)
-    end)
+--> [< АИМБОТЫ >] <--
+local function getBestAimPart(char, customPart)
+    if not char then return nil end
+    if customPart and customPart ~= "Auto" then
+        local p = char:FindFirstChild(customPart)
+        if p and p:IsA("BasePart") then return p end
+    end
+    local camPos = Camera.CFrame.Position
+    local best, bestD = nil, math.huge
+    for _, n in ipairs(ALL_BODY_PARTS) do
+        local p = char:FindFirstChild(n)
+        if p and p:IsA("BasePart") then
+            local d = (p.Position - camPos).Magnitude
+            if d < bestD then bestD = d; best = p end
+        end
+    end
+    return best
+end
+local function isSameTeam(p, check)
+    if not check then return false end
+    if not p.Team or not LocalPlayer.Team then return false end
+    return p.Team == LocalPlayer.Team
+end
+local function isVisible(char, check)
+    if not check then return true end
+    local part = getBestAimPart(char, "Auto")
+    if not part then return false end
+    local origin = Camera.CFrame.Position
+    local dir = (part.Position - origin).unit * 500
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {LocalPlayer.Character, char}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    local res = Workspace:Raycast(origin, dir, params)
+    return not res or res.Instance:IsDescendantOf(char)
+end
+local function getTarget()
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    local originPos = myRoot.Position
+    local bestT, bestS = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LocalPlayer or isSameTeam(p, settings.teamCheck) then continue end
+        local char = p.Character
+        if not char then continue end
+        local hum = char:FindFirstChild("Humanoid")
+        if not hum or hum.Health <= 0 then continue end
+        local tp = getBestAimPart(char, settings.aimPart)
+        if not tp then continue end
+        if settings.wallCheck and not isVisible(char, true) then continue end
+        local enemyRoot = char:FindFirstChild("HumanoidRootPart")
+        if settings.maxDistance and settings.maxDistance > 0 and enemyRoot then
+            if (enemyRoot.Position - originPos).Magnitude > settings.maxDistance then continue end
+        end
+        local worldDist = (tp.Position - originPos).Magnitude
+        if settings.mode360 then
+            if worldDist < bestS then bestS = worldDist; bestT = p end
+        else
+            local sp, onScreen = Camera:WorldToViewportPoint(tp.Position)
+            if not onScreen then continue end
+            local cd = (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude
+            if cd > settings.fov then continue end
+            local score = settings.prioritizeClose and worldDist or cd
+            if score < bestS then bestS = score; bestT = p end
+        end
+    end
+    return bestT
+end
+local function getTarget2()
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    local originPos = myRoot.Position
+    local bestT, bestS = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LocalPlayer or isSameTeam(p, settings.aim2TeamCheck) then continue end
+        local char = p.Character
+        if not char then continue end
+        local hum = char:FindFirstChild("Humanoid")
+        if not hum or hum.Health <= 0 then continue end
+        local head = char:FindFirstChild("Head")
+        if not head then continue end
+        local aimPos = head.Position + Vector3.new(0, settings.aim2HeightOffset, 0)
+        if settings.aim2WallCheck and not isVisible(char, true) then continue end
+        local enemyRoot = char:FindFirstChild("HumanoidRootPart")
+        if settings.aim2MaxDistance and settings.aim2MaxDistance > 0 and enemyRoot then
+            if (enemyRoot.Position - originPos).Magnitude > settings.aim2MaxDistance then continue end
+        end
+        local worldDist = (aimPos - originPos).Magnitude
+        if settings.aim2Mode360 then
+            if worldDist < bestS then bestS = worldDist; bestT = p end
+        else
+            local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
+            if not onScreen then continue end
+            local cd = (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude
+            if cd > settings.aim2Fov then continue end
+            local score = settings.aim2PrioritizeClose and worldDist or cd
+            if score < bestS then bestS = score; bestT = p end
+        end
+    end
+    return bestT
+end
+local function aimAtTarget(p)
+    if not p or not p.Character then return end
+    local tp = getBestAimPart(p.Character, settings.aimPart)
+    if not tp then return end
+    local rp = p.Character:FindFirstChild("HumanoidRootPart")
+    local pos = tp.Position + (rp and rp.Velocity * settings.prediction or Vector3.new())
+    local cur = Camera.CFrame
+    local tgt = CFrame.new(cur.Position, pos)
+    Camera.CFrame = cur:Lerp(tgt, math.clamp(1 - settings.smoothing, 0.05, 1))
+end
+local function aimAtTarget2(p)
+    if not p or not p.Character then return end
+    local head = p.Character:FindFirstChild("Head")
+    if not head then return end
+    local rp = p.Character:FindFirstChild("HumanoidRootPart")
+    local aimPos = head.Position + Vector3.new(0, settings.aim2HeightOffset, 0)
+    local pos = aimPos + (rp and rp.Velocity * settings.aim2Prediction or Vector3.new())
+    local cur = Camera.CFrame
+    local tgt = CFrame.new(cur.Position, pos)
+    Camera.CFrame = cur:Lerp(tgt, math.clamp(1 - settings.aim2Smoothing, 0.05, 1))
 end
 
-local function forceReconnect()
-    Rayfield:Notify({Title = "⚡ Force Reconnect", Content = "Переподключение...", Duration = 3})
+--> [< SERVER FUNCTIONS >] <--
+local function serverHop()
+    Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск...", Duration = 3})
     pcall(function()
+        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+        local servers = HttpService:JSONDecode(game:HttpGet(url))
+        local avail = {}
+        for _, s in ipairs(servers.data) do
+            if s.playing < s.maxPlayers and s.id ~= game.JobId then table.insert(avail, s.id) end
+        end
+        if #avail > 0 then
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, avail[math.random(1, #avail)], LocalPlayer)
+        else
+            Fluent:Notify({Title = "❌", Content = "Нет других серверов", Duration = 3})
+        end
+    end)
+end
+local function rejoinServer()
+    Fluent:Notify({Title = "🔁 Rejoin", Content = "Переподключение...", Duration = 3})
+    pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
+end
+local function forceReconnect()
+    Fluent:Notify({Title = "⚡ Force Reconnect", Content = "Принудительное...", Duration = 3})
+    task.spawn(function()
         for i = 1, 3 do
             local ok = pcall(function()
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, plr)
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
             end)
             if ok then return end
             task.wait(1)
         end
-        TeleportService:Teleport(game.PlaceId, plr)
-    end)
-end
-
-local function rejoinGame()
-    Rayfield:Notify({Title = "🎮 Rejoin Game", Content = "Переподключение...", Duration = 3})
-    pcall(function()
-        TeleportService:Teleport(game.PlaceId, plr)
+        pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
     end)
 end
 
 --> [< GUI >] <--
-
-local Window = Rayfield:CreateWindow({
-    Name = "▶ Universal Aimbot ◀",
-    LoadingTitle = "Loading...",
-    LoadingSubtitle = "by Agreed 🥵",
-    ConfigurationSaving = {Enabled = false},
+local Window = Fluent:CreateWindow({
+    Title = "Flumium Client v1.1",
+    SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(600, 520),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.RightControl
 })
 
-Window.OnClose = function() closeScript() end
+pcall(function()
+    Window:ModifyTheme({
+        {"Window", "Background",        Color3.fromRGB(38, 23, 43)},
+        {"Window", "Outline",           Color3.fromRGB(74, 47, 80)},
+        {"Window", "Title",             Color3.fromRGB(252, 232, 245)},
+        {"Window", "SubTitle",          Color3.fromRGB(200, 165, 215)},
+        {"Element", "Background",       Color3.fromRGB(48, 30, 53)},
+        {"Element", "Background Secondary", Color3.fromRGB(58, 38, 68)},
+        {"Element", "Text",             Color3.fromRGB(252, 240, 255)},
+        {"Element", "SubText",          Color3.fromRGB(200, 165, 215)},
+        {"Element", "Placeholder",      Color3.fromRGB(150, 120, 170)},
+        {"Element", "Border",           Color3.fromRGB(74, 47, 80)},
+        {"Outline", "Color",            Color3.fromRGB(74, 47, 80)},
+        {"Accent", "Background",        Color3.fromRGB(236, 116, 178)},
+        {"Accent", "Text",              Color3.fromRGB(255, 255, 255)},
+        {"Accent", "Border",            Color3.fromRGB(236, 116, 178)},
+        {"Tabs", "Tab",                 Color3.fromRGB(48, 30, 53)},
+        {"Tabs", "Tab Text",            Color3.fromRGB(200, 165, 215)},
+        {"Tabs", "Tab Selected",        Color3.fromRGB(236, 116, 178)},
+        {"Tabs", "Tab Selected Text",   Color3.fromRGB(255, 255, 255)},
+    })
+end)
 
-local AimbotTab = Window:CreateTab("Aimbot 🎯")
-local VisualTab = Window:CreateTab("Visual 👁️")
-local ConfigTab = Window:CreateTab("Config ⚙️")
-local ServerTab = Window:CreateTab("Server 🌐")
+local Tabs = {
+    Aimbot      = Window:AddTab({ Title = "Aimbot 🎯",      Icon = "crosshair" }),
+    Aimbot2     = Window:AddTab({ Title = "Aimbot 2 🎯",    Icon = "target" }),
+    Silent      = Window:AddTab({ Title = "Silent Aim 🎭",  Icon = "eye-off" }),
+    ESP         = Window:AddTab({ Title = "ESP 👁️",         Icon = "eye" }),
+    Performance = Window:AddTab({ Title = "Performance ⚡",  Icon = "zap" }),
+    Colors      = Window:AddTab({ Title = "Colors 🎨",      Icon = "palette" }),
+    Visual      = Window:AddTab({ Title = "Visual ✨",      Icon = "sun" }),
+    Server      = Window:AddTab({ Title = "Server 🌐",      Icon = "globe" }),
+    UI          = Window:AddTab({ Title = "UI Settings",    Icon = "settings" })
+}
+local Options = Fluent.Options
 
---> [< ВКЛАДКА AIMBOT >] <--
-
-AimbotTab:CreateToggle({
-    Name = "Enable Aimbot",
-    CurrentValue = false,
-    Callback = function(Value)
-        aimbotEnabled = Value
-        if fovCircle then
-            fovCircle.Visible = settings.showFovCircle and Value
-        end
-        if not Value then
-            aiming = false
-            currentTarget = nil
-        end
-    end
-})
-
-AimbotTab:CreateButton({Name = "👁️ Hide Menu", Callback = function() toggleMenu() end})
-AimbotTab:CreateButton({Name = "🔴 Close Script", Callback = function() closeScript() end})
-
-AimbotTab:CreateDropdown({
-    Name = "Activation Key",
-    Options = {"BackSlash (\\)", "LeftControl", "RightControl", "LeftShift", "RightShift", "F", "Q", "E", "R", "T"},
-    CurrentOption = "BackSlash (\\)",
-    Flag = "ActKey",
-    Callback = function(Option)
-        if not Option then return end
-        if type(Option) == "table" then Option = Option[1] end
-        Option = tostring(Option)
-        
-        if Option == "BackSlash (\\)" then settings.key = "BackSlash"
-        elseif Option == "LeftControl" then settings.key = "LeftControl"
-        elseif Option == "RightControl" then settings.key = "RightControl"
-        elseif Option == "LeftShift" then settings.key = "LeftShift"
-        elseif Option == "RightShift" then settings.key = "RightShift"
-        elseif Option == "F" then settings.key = "F"
-        elseif Option == "Q" then settings.key = "Q"
-        elseif Option == "E" then settings.key = "E"
-        elseif Option == "R" then settings.key = "R"
-        elseif Option == "T" then settings.key = "T"
-        end
-    end
-})
-
-AimbotTab:CreateDropdown({
-    Name = "Aim Part",
-    Options = {
-        "Auto (Best Available)", "Head", "HumanoidRootPart", "UpperTorso",
-        "Torso", "LowerTorso", "LeftUpperArm", "RightUpperArm",
-        "LeftLowerArm", "RightLowerArm", "LeftUpperLeg", "RightUpperLeg",
-        "LeftLowerLeg", "RightLowerLeg", "LeftHand", "RightHand",
-        "LeftFoot", "RightFoot"
-    },
-    CurrentOption = "Auto (Best Available)",
-    Flag = "AimPart",
-    Callback = function(Option)
-        if not Option then return end
-        if type(Option) == "table" then Option = Option[1] or "Auto (Best Available)" end
-        Option = tostring(Option):gsub("^%s*(.-)%s*$", "%1")
-        
-        if Option == "Auto (Best Available)" then
-            settings.aimPart = "Auto"
-        else
-            settings.aimPart = Option
-        end
-    end
-})
-
-AimbotTab:CreateToggle({Name = "Toggle Mode", CurrentValue = false, Callback = function(Value) settings.aimMode = Value and "Toggle" or "Hold" end})
-AimbotTab:CreateSlider({Name = "FOV Size", Range = {0, 800}, Increment = 1, CurrentValue = 300, Callback = function(Value) settings.fov = Value; if fovCircle then fovCircle.Radius = Value end end})
-AimbotTab:CreateSlider({Name = "Max Distance", Range = {0, 5000}, Increment = 10, CurrentValue = 5000, Callback = function(Value) settings.maxDistance = Value end})
-AimbotTab:CreateToggle({Name = "Prioritize Close", CurrentValue = true, Callback = function(Value) settings.prioritizeClose = Value end})
-AimbotTab:CreateSlider({Name = "Smoothing", Range = {0, 100}, Increment = 1, CurrentValue = 15, Callback = function(Value) settings.smoothing = Value / 100 end})
-AimbotTab:CreateSlider({Name = "Prediction", Range = {0, 30}, Increment = 1, CurrentValue = 6, Callback = function(Value) settings.prediction = Value / 100 end})
-AimbotTab:CreateToggle({Name = "Wall Check", CurrentValue = false, Callback = function(Value) settings.wallCheck = Value end})
-AimbotTab:CreateToggle({Name = "Sticky Aim", CurrentValue = false, Callback = function(Value) settings.stickyAim = Value end})
-AimbotTab:CreateToggle({Name = "Team Check", CurrentValue = false, Callback = function(Value) settings.teamCheck = Value end})
-AimbotTab:CreateToggle({Name = "Health Check", CurrentValue = false, Callback = function(Value) settings.healthCheck = Value end})
-AimbotTab:CreateSlider({Name = "Min Health", Range = {0, 100}, Increment = 1, CurrentValue = 0, Callback = function(Value) settings.minHealth = Value end})
-
---> [< ВКЛАДКА VISUAL >] <--
-
-VisualTab:CreateToggle({Name = "X-Ray", CurrentValue = false, Callback = function(Value) setXRay(Value) end})
-VisualTab:CreateToggle({Name = "Full Bright", CurrentValue = false, Callback = function(Value) setFullBright(Value) end})
-VisualTab:CreateToggle({Name = "Night Vision", CurrentValue = false, Callback = function(Value) setNightVision(Value) end})
-VisualTab:CreateToggle({Name = "No Shadows", CurrentValue = false, Callback = function(Value) setNoShadows(Value) end})
-VisualTab:CreateToggle({Name = "No Bloom", CurrentValue = false, Callback = function(Value) setNoBloom(Value) end})
-VisualTab:CreateToggle({Name = "No Sun Rays", CurrentValue = false, Callback = function(Value) setNoSunRays(Value) end})
-VisualTab:CreateToggle({Name = "Rainbow Lighting", CurrentValue = false, Callback = function(Value) setRainbowLighting(Value) end})
-VisualTab:CreateToggle({Name = "No Fog", CurrentValue = false, Callback = function(Value) setNoFog(Value) end})
-
-VisualTab:CreateButton({
-    Name = "🔄 Reset Visual Effects",
+--> [< ВКЛАДКА AIMBOT 1 >] <--
+Tabs.Aimbot:AddToggle("AimOn", {Title = "Enable Aimbot", Default = false}):OnChanged(function(v)
+    aimbotEnabled = v
+    if fovCircle then fovCircle.Visible = settings.showFovCircle and v and not settings.mode360 end
+    if not v then aiming = false; currentTarget = nil end
+end)
+Tabs.Aimbot:AddToggle("ShowFOV", {Title = "Show FOV Circle", Default = true}):OnChanged(function(v)
+    settings.showFovCircle = v
+    if fovCircle then fovCircle.Visible = v and aimbotEnabled and not settings.mode360 end
+end)
+Tabs.Aimbot:AddColorpicker("FovColor", {Title = "FOV Color", Default = Color3.fromRGB(255, 0, 0)}):OnChanged(function(c)
+    settings.fovColor = c
+    if fovCircle and not settings.rainbowFov then fovCircle.Color = c end
+end)
+Tabs.Aimbot:AddToggle("RainbowFov", {Title = "Rainbow FOV", Default = false}):OnChanged(function(v) settings.rainbowFov = v end)
+Tabs.Aimbot:AddDropdown("AimPart", {Title = "Aim Part",
+    Values = {"Auto", "Head", "HumanoidRootPart", "UpperTorso", "Torso"}, Default = 1
+}):OnChanged(function(v) settings.aimPart = v end)
+Tabs.Aimbot:AddDropdown("AimMode", {Title = "Aim Mode",
+    Values = {"Hold (зажать)", "Toggle (переключить)"}, Default = 1
+}):OnChanged(function(v) settings.aimMode = (v == "Hold (зажать)") and "Hold" or "Toggle" end)
+local aimBindButton
+aimBindButton = Tabs.Aimbot:AddButton({
+    Title = "🎹 BIND: " .. settings.aimKey.Name,
     Callback = function()
-        setXRay(false)
-        setFullBright(false)
-        setNightVision(false)
-        setNoShadows(false)
-        setNoBloom(false)
-        setNoSunRays(false)
-        setRainbowLighting(false)
-        setNoFog(false)
-        Rayfield:Notify({Title = "🔄 Reset", Content = "Эффекты сброшены", Duration = 2})
+        settings.ListeningForAimBind = true
+        pcall(function() aimBindButton:SetTitle("🎹 Нажмите клавишу...") end)
     end
 })
+Tabs.Aimbot:AddSlider("FOV", {Title = "FOV Size", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(v)
+    settings.fov = v; if fovCircle then fovCircle.Radius = v end
+end)
+Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance", Description = "0 = без ограничений", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v) settings.maxDistance = v end)
+Tabs.Aimbot:AddToggle("PriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) settings.prioritizeClose = v end)
+Tabs.Aimbot:AddToggle("Mode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
+    settings.mode360 = v
+    if v and fovCircle then fovCircle.Visible = false end
+end)
+Tabs.Aimbot:AddSlider("Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v) settings.smoothing = v / 100 end)
+Tabs.Aimbot:AddSlider("Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v) settings.prediction = v / 100 end)
+Tabs.Aimbot:AddToggle("WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.wallCheck = v end)
+Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.teamCheck = v end)
 
-VisualTab:CreateToggle({Name = "Show FOV Circle", CurrentValue = true, Callback = function(Value)
-    settings.showFovCircle = Value
-    if fovCircle then fovCircle.Visible = Value and aimbotEnabled end
-end})
-
-VisualTab:CreateColorPicker({Name = "FOV Color", Color = settings.fovColor, Callback = function(Color)
-    settings.fovColor = Color
-    if fovCircle and not settings.rainbowFov then fovCircle.Color = Color end
-end})
-
-VisualTab:CreateColorPicker({Name = "Targeted Color", Color = settings.targetedColor, Callback = function(Color) settings.targetedColor = Color end})
-VisualTab:CreateToggle({Name = "Rainbow FOV", CurrentValue = false, Callback = function(Value) settings.rainbowFov = Value end})
-
---> [< ВКЛАДКА CONFIG >] <--
-
-local configNameInput = ConfigTab:CreateInput({
-    Name = "Название конфига",
-    CurrentValue = "my_config",
-    PlaceholderText = "Введите название...",
-    RemoveTextAfterFocusLost = false,
-    Flag = "ConfigName"
-})
-
-local configDropdown
-configDropdown = ConfigTab:CreateDropdown({
-    Name = "Выбрать конфиг",
-    Options = getConfigList(),
-    CurrentOption = "Нет конфигов",
-    Flag = "ConfigSelect",
-    Callback = function(Option)
-        if type(Option) == "table" then Option = Option[1] end
-    end
-})
-
-ConfigTab:CreateButton({
-    Name = "🔄 Обновить список",
+--> [< ВКЛАДКА AIMBOT 2 >] <--
+Tabs.Aimbot2:AddParagraph({ Title = "🎯 Aimbot 2 — Headshot", Content = "Целится ВЫШЕ головы. По умолчанию на клавише [1]" })
+Tabs.Aimbot2:AddToggle("Aim2On", {Title = "Enable Aimbot 2", Default = false}):OnChanged(function(v)
+    aim2Enabled = v
+    if fovCircle2 then fovCircle2.Visible = settings.aim2ShowFovCircle and v and not settings.aim2Mode360 end
+    if not v then aim2ing = false; aim2Target = nil end
+end)
+Tabs.Aimbot2:AddToggle("Aim2ShowFOV", {Title = "Show FOV Circle", Default = true}):OnChanged(function(v)
+    settings.aim2ShowFovCircle = v
+    if fovCircle2 then fovCircle2.Visible = v and aim2Enabled and not settings.aim2Mode360 end
+end)
+Tabs.Aimbot2:AddColorpicker("Aim2FovColor", {Title = "FOV Color", Default = Color3.fromRGB(255, 165, 0)}):OnChanged(function(c)
+    settings.aim2FovColor = c
+    if fovCircle2 and not settings.aim2RainbowFov then fovCircle2.Color = c end
+end)
+Tabs.Aimbot2:AddToggle("Aim2RainbowFov", {Title = "Rainbow FOV", Default = false}):OnChanged(function(v) settings.aim2RainbowFov = v end)
+Tabs.Aimbot2:AddDropdown("Aim2Mode", {Title = "Aim Mode",
+    Values = {"Hold (зажать)", "Toggle (переключить)"}, Default = 1
+}):OnChanged(function(v) settings.aim2Mode = (v == "Hold (зажать)") and "Hold" or "Toggle" end)
+local aim2BindButton
+aim2BindButton = Tabs.Aimbot2:AddButton({
+    Title = "🎹 BIND: " .. settings.aim2Key.Name,
+    Description = "Нажмите для смены клавиши (по умолчанию 1)",
     Callback = function()
-        local list = getConfigList()
-        configDropdown:Refresh(list, list[1])
-        Rayfield:Notify({Title = "🔄", Content = "Найдено: " .. tostring(#list), Duration = 2})
+        settings.aim2ListeningForBind = true
+        pcall(function() aim2BindButton:SetTitle("🎹 Нажмите клавишу...") end)
     end
 })
+Tabs.Aimbot2:AddSlider("Aim2Height", {
+    Title = "📏 Height Above Head (studs)",
+    Description = "На сколько studs выше головы целиться",
+    Default = 3, Min = 0, Max = 20, Rounding = 0
+}):OnChanged(function(v) settings.aim2HeightOffset = v end)
+Tabs.Aimbot2:AddSlider("Aim2FOV", {Title = "FOV Size", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(v)
+    settings.aim2Fov = v; if fovCircle2 then fovCircle2.Radius = v end
+end)
+Tabs.Aimbot2:AddSlider("Aim2MaxDist", {Title = "Max Distance", Description = "0 = без ограничений", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v) settings.aim2MaxDistance = v end)
+Tabs.Aimbot2:AddToggle("Aim2PriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) settings.aim2PrioritizeClose = v end)
+Tabs.Aimbot2:AddToggle("Aim2Mode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
+    settings.aim2Mode360 = v
+    if v and fovCircle2 then fovCircle2.Visible = false end
+end)
+Tabs.Aimbot2:AddSlider("Aim2Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v) settings.aim2Smoothing = v / 100 end)
+Tabs.Aimbot2:AddSlider("Aim2Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v) settings.aim2Prediction = v / 100 end)
+Tabs.Aimbot2:AddToggle("Aim2WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.aim2WallCheck = v end)
+Tabs.Aimbot2:AddToggle("Aim2TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.aim2TeamCheck = v end)
 
-ConfigTab:CreateButton({
-    Name = "💾 Сохранить конфиг",
+local markerSection = Tabs.Aimbot2:AddSection("Kunai Marker")
+markerSection:AddToggle("MarkerClick", { Title = "🌀 Enable Marker Hack", Default = false }):OnChanged(function(v)
+    markerClick.Enabled = v
+    if v then
+        enableKunaiHook()
+        Fluent:Notify({Title = "🌀 Marker ВКЛ", Content = "Зажми " .. markerClick.ModifierKey.Name, Duration = 3})
+    else
+        disableKunaiHook()
+    end
+end)
+local markerBindBtn
+markerBindBtn = markerSection:AddButton({
+    Title = "🎹 Modifier: " .. markerClick.ModifierKey.Name,
     Callback = function()
-        local name = configNameInput.Value
-        if not name or name == "" then
-            name = "config_" .. os.time()
+        markerClick.ListeningForBind = true
+        pcall(function() markerBindBtn:SetTitle("🎹 Нажмите...") end)
+    end
+})
+markerSection:AddSlider("MarkerH", { Title = "📏 Marker Height", Default = 3, Min = 0, Max = 20, Rounding = 0 }):OnChanged(function(v) markerClick.HeightOffset = v end)
+markerSection:AddToggle("MarkerDebug", {Title = "🔍 Debug", Default = false}):OnChanged(function(v) markerClick.Debug = v end)
+
+--> [< SILENT AIM TAB >] <--
+Tabs.Silent:AddToggle("SilentMaster", {Title = "Enable Silent Aim", Default = false}):OnChanged(function(v)
+    silentAim.MasterEnabled = v
+    if v then enableSilentHook() else disableSilentHook() end
+end)
+Tabs.Silent:AddDropdown("SilentMode", { Title = "Режим", Values = {"Hold", "Toggle"}, Default = 1 }):OnChanged(function(v) silentAim.Mode = v end)
+local silentBindButton
+silentBindButton = Tabs.Silent:AddButton({
+    Title = "🎹 BIND: " .. silentAim.HoldKey.Name,
+    Callback = function()
+        silentAim.ListeningForBind = true
+        pcall(function() silentBindButton:SetTitle("🎹 Нажмите...") end)
+    end
+})
+Tabs.Silent:AddSlider("SilentFOV", {Title = "FOV Radius", Default = 500, Min = 50, Max = 2000, Rounding = 0}):OnChanged(function(v)
+    silentAim.FOV = v; if silentFovCircle then silentFovCircle.Radius = v end
+end)
+Tabs.Silent:AddSlider("SilentPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) silentAim.Prediction = v / 100 end)
+Tabs.Silent:AddSlider("SilentMaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v) silentAim.MaxDistance = v end)
+Tabs.Silent:AddToggle("SilentPriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) silentAim.PrioritizeClose = v end)
+Tabs.Silent:AddToggle("SilentMode360", {Title = "360° Mode", Default = false}):OnChanged(function(v) silentAim.Mode360 = v end)
+Tabs.Silent:AddButton({
+    Title = "🔄 Переустановить хук",
+    Callback = function() disableSilentHook(); task.wait(0.3); if silentAim.MasterEnabled then enableSilentHook() end end
+})
+
+--> [< ESP TAB >] <--
+Tabs.ESP:AddToggle("ESPOn", {
+    Title = "Enable ESP",
+    Description = "Показывает HP (зелёный), MD (фиолетовый), Dodge (ON/КД)",
+    Default = false
+}):OnChanged(function(v)
+    ESP.Enabled = v
+    ESP.Visible = v
+    if v then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then espWatch(p) end
         end
-        
-        if saveConfig(name) then
-            task.wait(0.3)
-            local list = getConfigList()
-            configDropdown:Refresh(list, list[1])
+        rebuildESP()
+    else
+        for p in pairs(espData) do clearPlayer(p) end
+    end
+end)
+Tabs.ESP:AddToggle("EspName",  {Title = "Show Name", Default = true}):OnChanged(function(v) ESP.ShowName = v; rebuildESP() end)
+Tabs.ESP:AddToggle("EspHP",    {Title = "Show HP (green)", Default = true}):OnChanged(function(v) ESP.ShowHP = v; rebuildESP() end)
+Tabs.ESP:AddToggle("EspMD",    {Title = "Show MD (purple)", Default = true}):OnChanged(function(v) ESP.ShowMD = v; rebuildESP() end)
+Tabs.ESP:AddToggle("EspDodge", {Title = "Show Body Dodge (ON/КД)", Default = true}):OnChanged(function(v) ESP.ShowDodge = v; rebuildESP() end)
+Tabs.ESP:AddSlider("EspSize", {Title = "ESP Size", Default = 100, Min = 30, Max = 300, Rounding = 0}):OnChanged(function(v)
+    ESP.Size = v / 100
+    for _, d in pairs(espData) do
+        if d.gui then
+            local s = d.gui:FindFirstChild("Frame") and d.gui.Frame:FindFirstChildOfClass("UIScale")
+            if s then s.Scale = ESP.Size end
+        end
+    end
+end)
+Tabs.ESP:AddSlider("EspRate", {Title = "Update Rate (ms)", Default = 200, Min = 50, Max = 2000, Rounding = 50}):OnChanged(function(v) ESP.UpdateRate = v / 1000 end)
+Tabs.ESP:AddColorpicker("EspNameC",     {Title = "Name Color", Default = Color3.fromRGB(255, 255, 255)}):OnChanged(function(c) ESP.NameColor = c end)
+Tabs.ESP:AddColorpicker("EspHPC",       {Title = "HP Color", Default = Color3.fromRGB(0, 255, 0)}):OnChanged(function(c) ESP.HPColor = c end)
+Tabs.ESP:AddColorpicker("EspMDC",       {Title = "MD Color", Default = Color3.fromRGB(200, 100, 255)}):OnChanged(function(c) ESP.MDColor = c end)
+Tabs.ESP:AddColorpicker("EspDodgeOnC",  {Title = "Dodge ON Color", Default = Color3.fromRGB(0, 255, 0)}):OnChanged(function(c) ESP.DodgeOnColor = c end)
+Tabs.ESP:AddColorpicker("EspDodgeCDC",  {Title = "Dodge КД Color", Default = Color3.fromRGB(255, 60, 60)}):OnChanged(function(c) ESP.DodgeCDColor = c end)
+
+local espWhitelistSection = Tabs.ESP:AddSection("Player Whitelist (пусто = все)")
+Tabs.ESP:AddButton({
+    Title = "🔄 Обновить список игроков",
+    Callback = function()
+        local playerList = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then table.insert(playerList, p) end
+        end
+        if #playerList == 0 then Fluent:Notify({Title = "ℹ️", Content = "Нет игроков", Duration = 3}); return end
+        for _, p in ipairs(playerList) do
+            local isWL = ESP.Whitelist[p.Name] == true
+            espWhitelistSection:AddButton({
+                Title = (isWL and "✓ " or "  ") .. p.Name,
+                Callback = function()
+                    if ESP.Whitelist[p.Name] then ESP.Whitelist[p.Name] = nil
+                    else ESP.Whitelist[p.Name] = true end
+                    rebuildESP()
+                end
+            })
         end
     end
 })
 
-ConfigTab:CreateButton({
-    Name = "📂 Загрузить выбранный",
-    Callback = function()
-        local sel = configDropdown.Value
-        if type(sel) == "table" then sel = sel[1] end
-        loadConfig(sel)
-    end
+--> [< PERFORMANCE TAB >] <--
+Tabs.Performance:AddParagraph({
+    Title = "⚡ Performance Tools",
+    Content = "Low Detail Mode убирает текстуры, тени и частицы. FPS Unlocker снимает лимит кадров."
 })
 
-ConfigTab:CreateButton({
-    Name = "🗑️ Удалить выбранный",
+local lowDetailSection = Tabs.Performance:AddSection("Low Detail Mode")
+lowDetailSection:AddToggle("LowDetailOn", {
+    Title = "🔻 Low Detail Mode",
+    Description = "Отключает текстуры, decals, частицы, тени, воду, post-processing",
+    Default = false
+}):OnChanged(function(v)
+    setLowDetail(v)
+    if v then Fluent:Notify({Title = "🔻 Low Detail", Content = "Активирован", Duration = 2})
+    else Fluent:Notify({Title = "🔺 Low Detail", Content = "Отключён", Duration = 2}) end
+end)
+lowDetailSection:AddToggle("LDRemoveTextures", { Title = "Remove Textures", Default = true }):OnChanged(function(v)
+    lowDetailState.RemoveTextures = v
+    if lowDetailState.Enabled then setLowDetail(false); task.wait(0.1); setLowDetail(true) end
+end)
+lowDetailSection:AddToggle("LDRemoveDecals", { Title = "Remove Decals", Default = true }):OnChanged(function(v)
+    lowDetailState.RemoveDecals = v
+    if lowDetailState.Enabled then setLowDetail(false); task.wait(0.1); setLowDetail(true) end
+end)
+lowDetailSection:AddToggle("LDRemoveParticles", { Title = "Remove Particles", Default = true }):OnChanged(function(v)
+    lowDetailState.RemoveParticles = v
+    if lowDetailState.Enabled then setLowDetail(false); task.wait(0.1); setLowDetail(true) end
+end)
+lowDetailSection:AddToggle("LDRemoveShadows", { Title = "Remove Shadows", Default = true }):OnChanged(function(v)
+    lowDetailState.RemoveShadows = v
+    if lowDetailState.Enabled then setLowDetail(false); task.wait(0.1); setLowDetail(true) end
+end)
+lowDetailSection:AddToggle("LDPlastic", { Title = "Force Plastic Material", Default = true }):OnChanged(function(v)
+    lowDetailState.PlasticMaterial = v
+    if lowDetailState.Enabled then setLowDetail(false); task.wait(0.1); setLowDetail(true) end
+end)
+lowDetailSection:AddToggle("LDPostFX", { Title = "Disable Post-Processing", Default = true }):OnChanged(function(v) lowDetailState.DisablePostFX = v end)
+lowDetailSection:AddToggle("LDFog", { Title = "Extend Fog Distance", Default = true }):OnChanged(function(v) lowDetailState.FogDistance = v end)
+lowDetailSection:AddToggle("LDWater", { Title = "Optimize Water", Default = true }):OnChanged(function(v) lowDetailState.WaterOptimize = v end)
+
+local fpsSection = Tabs.Performance:AddSection("FPS Unlocker")
+fpsSection:AddToggle("FPSUnlock", {
+    Title = "🚀 Unlock FPS Cap",
+    Description = "Снимает стандартный лимит 60 FPS через setfpscap()",
+    Default = false
+}):OnChanged(function(v)
+    if v then
+        unlockFps(lowDetailState.FpsCap)
+        Fluent:Notify({Title = "🚀 FPS Unlocked", Content = "Cap: " .. lowDetailState.FpsCap, Duration = 3})
+    else
+        relockFps()
+        Fluent:Notify({Title = "🔒 FPS Locked", Content = "Cap: 60", Duration = 2})
+    end
+end)
+fpsSection:AddSlider("FpsCapSlider", {
+    Title = "FPS Cap (if unlocked)", Description = "0 = без лимита",
+    Default = 240, Min = 0, Max = 999, Rounding = 0
+}):OnChanged(function(v)
+    lowDetailState.FpsCap = v
+    if lowDetailState.FpsUnlocked then setFpsCap(v == 0 and 9999 or v) end
+end)
+fpsSection:AddButton({
+    Title = "🔄 Применить FPS Cap",
     Callback = function()
-        local sel = configDropdown.Value
-        if type(sel) == "table" then sel = sel[1] end
-        
-        if sel == "Нет конфигов" then
-            Rayfield:Notify({Title = "❌", Content = "Нечего удалять", Duration = 2})
-            return
+        local cap = lowDetailState.FpsCap == 0 and 9999 or lowDetailState.FpsCap
+        setFpsCap(cap)
+        Fluent:Notify({Title = "✅", Content = "FPS Cap = " .. lowDetailState.FpsCap, Duration = 2})
+    end
+})
+local perfStatusPara = Tabs.Performance:AddParagraph({
+    Title = "📊 Status", Content = "Low Detail: OFF | FPS: 60 (locked)"
+})
+__regConn(RunService.Heartbeat:Connect(function()
+    local ld = lowDetailState.Enabled and "ON" or "OFF"
+    local fps = lowDetailState.FpsUnlocked and tostring(lowDetailState.FpsCap) or "60 (locked)"
+    pcall(function() perfStatusPara:SetDesc("Low Detail: " .. ld .. " | FPS: " .. fps) end)
+end))
+
+--> [< COLORS TAB >] <--
+Tabs.Colors:AddToggle("InvertColors", {Title = "Инвертировать цвет", Default = true}):OnChanged(function(v) colors.Invert = v end)
+Tabs.Colors:AddToggle("RainbowSkin",  {Title = "Rainbow Skin", Default = false}):OnChanged(function(v) colors.RainbowSkin = v end)
+Tabs.Colors:AddToggle("RainbowHair",  {Title = "Rainbow Hair", Default = false}):OnChanged(function(v) colors.RainbowHair = v end)
+Tabs.Colors:AddSlider("SkinSpd", {Title = "Skin Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v) colors.SkinSpeed = v / 10 end)
+Tabs.Colors:AddSlider("HairSpd", {Title = "Hair Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v) colors.HairSpeed = v / 10 end)
+
+local colorPresets = {
+    {name = "🔴 Красный", r = 255, g = 0, b = 0},
+    {name = "🟢 Зелёный", r = 0, g = 255, b = 0},
+    {name = "🔵 Синий",   r = 0, g = 0, b = 255},
+    {name = "🟣 Фиолетовый", r = 128, g = 0, b = 255},
+    {name = "🟡 Жёлтый",  r = 255, g = 255, b = 0},
+    {name = "⚫ Чёрный",  r = 1, g = 1, b = 1},
+    {name = "⚪ Белый",   r = 254, g = 254, b = 254},
+    {name = "🟠 Оранжевый", r = 255, g = 128, b = 0},
+    {name = "💗 Розовый", r = 255, g = 105, b = 180},
+    {name = "🩵 Cyan",    r = 0, g = 255, b = 255}
+}
+for _, preset in ipairs(colorPresets) do
+    Tabs.Colors:AddButton({
+        Title = preset.name .. " СКИН",
+        Callback = function()
+            setSkinColor(preset.r, preset.g, preset.b)
+            Fluent:Notify({Title = "🎨 Скин", Content = preset.name, Duration = 2})
         end
-        
-        if deleteConfig(sel) then
-            task.wait(0.3)
-            local list = getConfigList()
-            configDropdown:Refresh(list, list[1])
+    })
+end
+Tabs.Colors:AddColorpicker("CustomSkin", {Title = "Кастомный скин", Default = Color3.fromRGB(255, 0, 0)})
+Tabs.Colors:AddButton({
+    Title = "✅ Применить кастомный скин",
+    Callback = function()
+        local c = Options.CustomSkin.Value
+        if c then setSkinColor(math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255)) end
+    end
+})
+for _, preset in ipairs(colorPresets) do
+    Tabs.Colors:AddButton({
+        Title = preset.name .. " ВОЛОСЫ",
+        Callback = function()
+            setHairColor(preset.r, preset.g, preset.b)
+            Fluent:Notify({Title = "🎨 Волосы", Content = preset.name, Duration = 2})
         end
-    end
-})
-
-local autoExecData = loadAutoExec()
-
-local autoLoadToggle = ConfigTab:CreateToggle({
-    Name = "🚀 Auto-Load при запуске",
-    CurrentValue = autoExecData.autoLoad or false,
-    Flag = "AutoLoadToggle",
-    Callback = function(Value)
-        local currentConfig = configDropdown.Value
-        if type(currentConfig) == "table" then currentConfig = currentConfig[1] end
-        saveAutoExec(currentConfig, Value)
-        Rayfield:Notify({
-            Title = Value and "✅ Включено" or "❌ Выключено",
-            Content = "Auto-Load: " .. tostring(Value),
-            Duration = 2
-        })
-    end
-})
-
-ConfigTab:CreateButton({
-    Name = "📌 Сделать конфигом по умолчанию",
+    })
+end
+Tabs.Colors:AddColorpicker("CustomHair", {Title = "Кастомные волосы", Default = Color3.fromRGB(255, 0, 0)})
+Tabs.Colors:AddButton({
+    Title = "✅ Применить кастомные волосы",
     Callback = function()
-        local sel = configDropdown.Value
-        if type(sel) == "table" then sel = sel[1] end
-        
-        if sel == "Нет конфигов" then
-            Rayfield:Notify({Title = "❌", Content = "Выберите конфиг", Duration = 2})
-            return
+        local c = Options.CustomHair.Value
+        if c then setHairColor(math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255)) end
+    end
+})
+
+--> [< VISUAL TAB >] <--
+Tabs.Visual:AddToggle("XRay", {Title = "X-Ray", Default = false}):OnChanged(function(v) setXRay(v) end)
+Tabs.Visual:AddToggle("FB",   {Title = "Full Bright", Default = false}):OnChanged(function(v) setFullBright(v) end)
+Tabs.Visual:AddToggle("NV",   {Title = "Night Vision", Default = false}):OnChanged(function(v) setNightVision(v) end)
+Tabs.Visual:AddToggle("NoSh", {Title = "No Shadows", Default = false}):OnChanged(function(v) setNoShadows(v) end)
+Tabs.Visual:AddToggle("NoBl", {Title = "No Bloom", Default = false}):OnChanged(function(v) setNoBloom(v) end)
+Tabs.Visual:AddToggle("NoSR", {Title = "No Sun Rays", Default = false}):OnChanged(function(v) setNoSunRays(v) end)
+Tabs.Visual:AddToggle("RainL",{Title = "Rainbow Lighting", Default = false}):OnChanged(function(v) setRainbowLighting(v) end)
+Tabs.Visual:AddToggle("NoFog",{Title = "No Fog", Default = false}):OnChanged(function(v) setNoFog(v) end)
+
+--> [< SERVER TAB >] <--
+local topPingPara = Tabs.Server:AddParagraph({ Title = "📶 Ping / 🌍 Server Region", Content = "Загрузка..." })
+local topIpPara = Tabs.Server:AddParagraph({ Title = "🖥️ Server IP / Location (via ip-api)", Content = "Загрузка..." })
+
+task.spawn(function()
+    task.wait(0.5)
+    local info = getServerLocation()
+    local clientCc = getClientCountry()
+    local cLat, cLon, cCode = getClientCoords()
+    local p = getPlayerPing()
+    local dot = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
+    pcall(function() topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, clientCc)) end)
+    if info and info.status == "success" then
+        local distText = "?"
+        if cLat and cLon and info.lat and info.lon then
+            distText = haversine(cLat, cLon, info.lat, info.lon) .. " km"
         end
-        
-        saveAutoExec(sel, autoLoadToggle.Value)
-        Rayfield:Notify({
-            Title = "📌 Установлено",
-            Content = sel .. " будет загружаться при старте",
-            Duration = 3
-        })
+        pcall(function()
+            topIpPara:SetDesc(string.format(
+                "%s, %s (%s)  |  IP: %s  |  ISP: %s  |  ~%s от тебя",
+                info.city or "?", info.country or "?", info.countryCode or "?",
+                info.query or "?", info.isp or "?", distText
+            ))
+        end)
+    else
+        pcall(function() topIpPara:SetDesc("Не удалось получить IP сервера: " .. tostring(info and info.err or "unknown")) end)
     end
-})
+end)
 
-ConfigTab:CreateButton({
-    Name = "📁 Где хранятся конфиги?",
-    Callback = function()
-        Rayfield:Notify({
-            Title = "📁 Папка конфигов",
-            Content = "workspace/" .. CONFIGS_FOLDER,
-            Duration = 6
-        })
-        print("📁 Конфиги: workspace/" .. CONFIGS_FOLDER)
+local HISTORY_FILE = "FlumiumJobHistory.json"
+local HISTORY_MAX = 10
+local function hasFs()
+    return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+end
+local function loadHistory()
+    if not hasFs() then return {} end
+    local ok, exists = pcall(isfile, HISTORY_FILE)
+    if not ok or not exists then return {} end
+    local ok2, content = pcall(readfile, HISTORY_FILE)
+    if not ok2 or type(content) ~= "string" or content == "" then return {} end
+    local ok3, data = pcall(function() return HttpService:JSONDecode(content) end)
+    if not ok3 or type(data) ~= "table" then return {} end
+    return data
+end
+local function saveHistory(list)
+    if not hasFs() then return end
+    pcall(function() writefile(HISTORY_FILE, HttpService:JSONEncode(list)) end)
+end
+local function pushHistory(jobId)
+    if not jobId or jobId == "" then return loadHistory() end
+    local list = loadHistory()
+    for i = #list, 1, -1 do
+        if list[i].id == jobId then table.remove(list, i) end
     end
-})
-
---> [< ВКЛАДКА SERVER >] <--
-
-ServerTab:CreateButton({Name = "🔄 Server Hop", Callback = function() serverHop() end})
-ServerTab:CreateButton({Name = "🔁 Rejoin Server", Callback = function() rejoinServer() end})
-ServerTab:CreateButton({Name = "⚡ Force Reconnect", Callback = function() forceReconnect() end})
-ServerTab:CreateButton({Name = "🎮 Rejoin Game", Callback = function() rejoinGame() end})
-
-ServerTab:CreateButton({
-    Name = "📋 Информация о сервере",
-    Callback = function()
-        Rayfield:Notify({
-            Title = "📊 Сервер",
-            Content = "Place ID: " .. game.PlaceId .. "\nJob ID: " .. string.sub(game.JobId, 1, 20) .. "...\nИгроков: " .. #players:GetPlayers() .. "/" .. players.MaxPlayers,
-            Duration = 8
-        })
+    table.insert(list, 1, { id = jobId, place = game.PlaceId, players = #Players:GetPlayers(), time = os.time() })
+    while #list > HISTORY_MAX do table.remove(list) end
+    saveHistory(list)
+    return list
+end
+local function fmtTime(t)
+    if not t then return "--:--" end
+    local ok, d = pcall(os.date, "*t", t)
+    if not ok or not d then return "--:--" end
+    return string.format("%02d:%02d", d.hour, d.min)
+end
+local function teleportToJob(targetId, labelText)
+    if not targetId or targetId == "" then
+        Fluent:Notify({Title = "❌", Content = "Пустой Job ID", Duration = 3}); return
     end
-})
-
-ServerTab:CreateButton({
-    Name = "📋 Скопировать Job ID",
-    Callback = function()
-        setclipboard(game.JobId)
-        Rayfield:Notify({Title = "✅", Content = "Job ID скопирован", Duration = 2})
+    if targetId == game.JobId then
+        Fluent:Notify({Title = "ℹ️", Content = "Ты уже на этом сервере", Duration = 3}); return
     end
-})
-
-ServerTab:CreateButton({
-    Name = "👥 Список игроков",
-    Callback = function()
-        local list = {}
-        for _, p in ipairs(players:GetPlayers()) do
-            if p ~= plr then table.insert(list, p.Name) end
+    pushHistory(game.JobId)
+    Fluent:Notify({ Title = "➡️ JOIN",
+        Content = (labelText or "Подключаюсь") .. " → " .. targetId:sub(1, 8) .. "...",
+        Duration = 3 })
+    task.spawn(function()
+        local ok, err = pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetId, LocalPlayer)
+        end)
+        if not ok then
+            local ok2 = pcall(function()
+                local opts = Instance.new("TeleportOptions")
+                opts.ServerInstanceId = targetId
+                TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, opts)
+            end)
+            if not ok2 then
+                Fluent:Notify({ Title = "❌ JOIN failed",
+                    Content = "Сервер мёртв / приватный / полный. " .. tostring(err):sub(1, 45),
+                    Duration = 5 })
+            end
         end
-        
-        local text = #list > 0 and table.concat(list, ", ") or "Нет игроков"
-        if #text > 200 then text = string.sub(text, 1, 200) .. "..." end
-        
-        Rayfield:Notify({Title = "👥 Игроки (" .. #list .. ")", Content = text, Duration = 8})
-    end
-})
-
---> [< ОБРАБОТКА КЛАВИШ >] <--
-
-local function getKeyCode(keyName)
-    local map = {
-        BackSlash = Enum.KeyCode.BackSlash,
-        LeftControl = Enum.KeyCode.LeftControl,
-        RightControl = Enum.KeyCode.RightControl,
-        LeftShift = Enum.KeyCode.LeftShift,
-        RightShift = Enum.KeyCode.RightShift,
-        F = Enum.KeyCode.F, Q = Enum.KeyCode.Q, E = Enum.KeyCode.E,
-        R = Enum.KeyCode.R, T = Enum.KeyCode.T
-    }
-    return map[keyName]
+    end)
 end
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.RightControl then toggleMenu() end
-    if not aimbotEnabled then return end
-    
-    local keyEnum = getKeyCode(settings.key)
-    if keyEnum and input.KeyCode == keyEnum then
-        if settings.aimMode == "Hold" then
-            aiming = true
-        elseif settings.aimMode == "Toggle" then
-            aiming = not aiming
-            if not aiming then currentTarget = nil end
+Tabs.Server:AddButton({ Title = "🔄 Server Hop", Callback = function() pushHistory(game.JobId); serverHop() end })
+Tabs.Server:AddButton({ Title = "🔁 Rejoin Server", Callback = function() pushHistory(game.JobId); rejoinServer() end })
+Tabs.Server:AddButton({ Title = "⚡ Force Reconnect", Callback = function() pushHistory(game.JobId); forceReconnect() end })
+
+local jobSection = Tabs.Server:AddSection("Job ID")
+local jobPara = jobSection:AddParagraph({
+    Title = "📋 Current Job ID",
+    Content = game.JobId ~= "" and game.JobId or "(нет — приватный / offline)"
+})
+jobSection:AddButton({
+    Title = "📋 Скопировать текущий Job ID",
+    Description = "Кладёт в буфер ID этого сервера (только публичные)",
+    Callback = function()
+        if game.JobId == "" then Fluent:Notify({Title = "❌", Content = "Job ID недоступен", Duration = 3}); return end
+        local ok = pcall(function()
+            if type(setclipboard) == "function" then setclipboard(game.JobId)
+            elseif type(toclipboard) == "function" then toclipboard(game.JobId)
+            else error("no clipboard") end
+        end)
+        if ok then Fluent:Notify({Title = "📋 Скопировано", Content = game.JobId, Duration = 3})
+        else Fluent:Notify({Title = "❌", Content = "Буфер недоступен", Duration = 3}) end
+    end
+})
+jobSection:AddButton({
+    Title = "🔄 Обновить Job ID",
+    Callback = function()
+        pcall(function() jobPara:SetDesc(game.JobId ~= "" and game.JobId or "(нет — приватный / offline)") end)
+        Fluent:Notify({Title = "🔄", Content = "Job ID обновлён", Duration = 2})
+    end
+})
+local jobInputBox = jobSection:AddInput("JobIDInput", {
+    Title = "🔌 Join by Job ID",
+    Description = "Вставь Job ID публичного сервера (сервер должен быть жив)",
+    Placeholder = "e.g. a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+    Default = ""
+})
+jobSection:AddButton({
+    Title = "➡️ JOIN по Job ID",
+    Callback = function()
+        local raw = nil
+        pcall(function() raw = jobInputBox.Value end)
+        raw = tostring(raw or ""):gsub("%s", "")
+        if raw == "" then Fluent:Notify({Title = "❌", Content = "Введи Job ID", Duration = 3}); return end
+        if not raw:match("^%x+$") or #raw < 8 then
+            Fluent:Notify({Title = "❌", Content = "Некорректный Job ID", Duration = 3}); return
+        end
+        teleportToJob(raw, "JOIN")
+    end
+})
+jobSection:AddButton({
+    Title = "📥 Вставить из буфера",
+    Callback = function()
+        local clip = nil
+        pcall(function() if type(getclipboard) == "function" then clip = getclipboard() end end)
+        clip = tostring(clip or ""):gsub("%s", "")
+        if clip == "" then Fluent:Notify({Title = "❌", Content = "Буфер пуст", Duration = 3}); return end
+        pcall(function() jobInputBox:SetValue(clip) end)
+        Fluent:Notify({Title = "📥", Content = "Вставлено: " .. clip:sub(1, 12) .. "...", Duration = 2})
+    end
+})
+jobSection:AddButton({
+    Title = "⏪ Join Last Server",
+    Description = "Вернуться на предыдущий сервер одним кликом",
+    Callback = function()
+        local list = loadHistory()
+        if #list == 0 then Fluent:Notify({Title = "❌", Content = "История пуста", Duration = 3}); return end
+        local target = nil
+        for _, entry in ipairs(list) do
+            if entry.id and entry.id ~= game.JobId then target = entry; break end
+        end
+        if not target then Fluent:Notify({Title = "ℹ️", Content = "Нет других серверов в истории", Duration = 3}); return end
+        teleportToJob(target.id, "LAST SERVER")
+    end
+})
+
+local historyDisplayMap = {}
+local historyDropdown
+local function buildHistoryValues()
+    historyDisplayMap = {}
+    local list = loadHistory()
+    local values = {}
+    if #list == 0 then values[#values + 1] = "(пусто)"; return values end
+    for i, e in ipairs(list) do
+        local id = e.id or "?"
+        local disp = string.format("🕐 %s  |  %s", fmtTime(e.time), id:sub(1, 12))
+        if historyDisplayMap[disp] then disp = disp .. " (" .. i .. ")" end
+        values[#values + 1] = disp
+        historyDisplayMap[disp] = id
+    end
+    return values
+end
+local initialValues = buildHistoryValues()
+historyDropdown = jobSection:AddDropdown("JobHistory", {
+    Title = "📚 Последние Job ID",
+    Description = "Выбери запись — подключение произойдёт автоматически",
+    Values = initialValues,
+    Default = initialValues[1] or "(пусто)",
+    Multi = false,
+    Callback = function(selected)
+        local id = historyDisplayMap[selected]
+        if not id or id == "" then return end
+        if id == game.JobId then Fluent:Notify({Title = "ℹ️", Content = "Это текущий сервер", Duration = 3}); return end
+        teleportToJob(id, "HISTORY")
+    end
+})
+jobSection:AddButton({
+    Title = "♻️ Обновить список истории",
+    Callback = function()
+        pcall(function() historyDropdown:SetValues(buildHistoryValues()) end)
+        Fluent:Notify({Title = "♻️", Content = "История обновлена", Duration = 2})
+    end
+})
+jobSection:AddButton({
+    Title = "🗑️ Очистить историю",
+    Callback = function()
+        if not hasFs() then Fluent:Notify({Title = "❌", Content = "Executor не поддерживает файлы", Duration = 3}); return end
+        pcall(function() if isfile(HISTORY_FILE) then delfile(HISTORY_FILE) end end)
+        pcall(function() historyDropdown:SetValues({"(пусто)"}) end)
+        historyDisplayMap = {}
+        Fluent:Notify({Title = "🗑️", Content = "История очищена", Duration = 2})
+    end
+})
+
+local randomSection = Tabs.Server:AddSection("Random Server")
+randomSection:AddParagraph({
+    Title = "ℹ️ О регионе",
+    Content = "Roblox не отдаёт регион напрямую. Пинг — приблизительный ориентир."
+})
+local REGION_PRESETS = {
+    ["🌍 Any (0–500 ms)"]   = {0, 500},
+    ["🇪🇺 Europe (0–90 ms)"] = {0, 90},
+    ["🇺🇸 USA (80–170 ms)"]  = {80, 170},
+    ["🌏 Asia (100–250 ms)"] = {100, 250},
+    ["🌎 Far (200–500 ms)"]  = {200, 500},
+}
+local randomState = { region = "🌍 Any (0–500 ms)", minPing = 0, maxPing = 500, minPlayers = 1, useRegionPreset = true, closestBias = true }
+local minPingSlider, maxPingSlider
+randomSection:AddDropdown("RegionPreset", {
+    Title = "🌐 Region Filter (via ping)",
+    Values = { "🌍 Any (0–500 ms)", "🇪🇺 Europe (0–90 ms)", "🇺🇸 USA (80–170 ms)", "🌏 Asia (100–250 ms)", "🌎 Far (200–500 ms)" },
+    Default = "🌍 Any (0–500 ms)", Multi = false,
+    Callback = function(v)
+        randomState.region = v
+        if randomState.useRegionPreset and REGION_PRESETS[v] then
+            randomState.minPing = REGION_PRESETS[v][1]
+            randomState.maxPing = REGION_PRESETS[v][2]
+            pcall(function()
+                minPingSlider:SetValue(randomState.minPing)
+                maxPingSlider:SetValue(randomState.maxPing)
+            end)
         end
     end
-end)
+})
+randomSection:AddToggle("UseRegionPreset", {
+    Title = "Использовать пресет региона", Default = true
+}):OnChanged(function(v) randomState.useRegionPreset = v end)
+minPingSlider = randomSection:AddSlider("MinPing", { Title = "Min Ping (ms)", Default = 0, Min = 0, Max = 500, Rounding = 0 }):OnChanged(function(v) randomState.minPing = v end)
+maxPingSlider = randomSection:AddSlider("MaxPing", { Title = "Max Ping (ms)", Default = 500, Min = 0, Max = 500, Rounding = 0 }):OnChanged(function(v) randomState.maxPing = v end)
+randomSection:AddSlider("MinPlayers", { Title = "Min Players", Description = "Не заходить в пустые серверы", Default = 1, Min = 0, Max = 50, Rounding = 0 }):OnChanged(function(v) randomState.minPlayers = v end)
+randomSection:AddToggle("ClosestBias", {
+    Title = "Смещение в сторону низкого пинга", Default = true
+}):OnChanged(function(v) randomState.closestBias = v end)
 
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if gameProcessed or not aimbotEnabled then return end
-    local keyEnum = getKeyCode(settings.key)
-    if keyEnum and input.KeyCode == keyEnum and settings.aimMode == "Hold" then
-        aiming = false
-        currentTarget = nil
+local function fetchPublicServers()
+    local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+    local ok, response = pcall(function() return game:HttpGet(url, true) end)
+    if not ok or type(response) ~= "string" then return {} end
+    local ok2, data = pcall(function() return HttpService:JSONDecode(response) end)
+    if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then return {} end
+    return data.data
+end
+local function pickRandomServer()
+    local servers = fetchPublicServers()
+    if #servers == 0 then return nil, "API пуст / недоступно" end
+    local candidates = {}
+    for _, s in ipairs(servers) do
+        local id, playing, maxP, ping = s.id, tonumber(s.playing) or 0, tonumber(s.maxPlayers) or 0, tonumber(s.ping) or 999
+        if id and id ~= game.JobId and playing < maxP and playing >= randomState.minPlayers
+           and ping >= randomState.minPing and ping <= randomState.maxPing then
+            candidates[#candidates + 1] = { id = id, ping = ping, playing = playing, maxPlayers = maxP }
+        end
     end
-end)
+    if #candidates == 0 then return nil, "Нет серверов под фильтр" end
+    table.sort(candidates, function(a, b) return a.ping < b.ping end)
+    local pick
+    if randomState.closestBias then
+        pick = candidates[math.random(1, math.min(10, #candidates))]
+    else
+        pick = candidates[math.random(1, #candidates)]
+    end
+    return pick
+end
+randomSection:AddButton({
+    Title = "🎲 Random Server",
+    Description = "Найти живой сервер по заданным фильтрам",
+    Callback = function()
+        Fluent:Notify({Title = "🎲 Поиск", Content = "Опрашиваю список серверов...", Duration = 2})
+        task.spawn(function()
+            local pick, err = pickRandomServer()
+            if not pick then Fluent:Notify({Title = "❌", Content = err or "Не найдено", Duration = 4}); return end
+            Fluent:Notify({ Title = "🎲 Найден",
+                Content = string.format("%s... | ping %d | %d/%d", pick.id:sub(1, 8), pick.ping, pick.playing, pick.maxPlayers),
+                Duration = 3 })
+            teleportToJob(pick.id, "RANDOM")
+        end)
+    end
+})
+
+__regConn(task.spawn(function()
+    while task.wait(1.5) do
+        local p = getPlayerPing()
+        local dot = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
+        local cc = getClientCountry()
+        pcall(function() topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, cc)) end)
+    end
+end))
+__regConn(task.spawn(function()
+    task.wait(2)
+    while task.wait(30) do
+        __serverLocCache = nil
+        local info = getServerLocation(true)
+        if info and info.status == "success" then
+            local cLat, cLon = getClientCoords()
+            local distText = "?"
+            if cLat and cLon and info.lat and info.lon then
+                distText = haversine(cLat, cLon, info.lat, info.lon) .. " km"
+            end
+            pcall(function()
+                topIpPara:SetDesc(string.format(
+                    "%s, %s (%s)  |  IP: %s  |  ISP: %s  |  ~%s от тебя",
+                    info.city or "?", info.country or "?", info.countryCode or "?",
+                    info.query or "?", info.isp or "?", distText
+                ))
+            end)
+        end
+    end
+end))
 
 --> [< ГЛАВНЫЙ ЦИКЛ >] <--
+__regConn(UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if markerClick.ListeningForBind then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            markerClick.ModifierKey = input.KeyCode
+            markerClick.ListeningForBind = false
+            pcall(function() markerBindBtn:SetTitle("🎹 Modifier: " .. input.KeyCode.Name) end)
+        end
+        return
+    end
+    if silentAim.ListeningForBind then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            silentAim.HoldKey = input.KeyCode
+            silentAim.ListeningForBind = false
+            pcall(function() silentBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end)
+        end
+        return
+    end
+    if settings.ListeningForAimBind then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            settings.aimKey = input.KeyCode
+            settings.ListeningForAimBind = false
+            pcall(function() aimBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end)
+        end
+        return
+    end
+    if settings.aim2ListeningForBind then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            settings.aim2Key = input.KeyCode
+            settings.aim2ListeningForBind = false
+            pcall(function() aim2BindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end)
+        end
+        return
+    end
+    if silentAim.MasterEnabled and silentAim.Mode == "Toggle" then
+        if input.KeyCode == silentAim.HoldKey then
+            silentAim.Enabled = not silentAim.Enabled
+        end
+    end
+    if aimbotEnabled and input.KeyCode == settings.aimKey then
+        if settings.aimMode == "Hold" then aiming = true
+        else aiming = not aiming; if not aiming then currentTarget = nil end end
+    end
+    if aim2Enabled and input.KeyCode == settings.aim2Key then
+        if settings.aim2Mode == "Hold" then aim2ing = true
+        else aim2ing = not aim2ing; if not aim2ing then aim2Target = nil end end
+    end
+end))
 
-RunService.RenderStepped:Connect(function()
+__regConn(UserInputService.InputEnded:Connect(function(input, gp)
+    if gp then return end
+    if aimbotEnabled and settings.aimMode == "Hold" and input.KeyCode == settings.aimKey then
+        aiming = false; currentTarget = nil
+    end
+    if aim2Enabled and settings.aim2Mode == "Hold" and input.KeyCode == settings.aim2Key then
+        aim2ing = false; aim2Target = nil
+    end
+end))
+
+__regConn(RunService.RenderStepped:Connect(function()
     if settings.rainbowLighting then
         lightingHue = (lightingHue + 0.005) % 1
         local c = Color3.fromHSV(lightingHue, 1, 1)
-        Lighting.Ambient = c
-        Lighting.OutdoorAmbient = c
+        Lighting.Ambient = c; Lighting.OutdoorAmbient = c
     end
-    
-    if not aimbotEnabled then
-        if fovCircle then fovCircle.Visible = false end
-        return
-    end
-    
-    if fovCircle and settings.showFovCircle then
-        fovCircle.Position = Vector2.new(mouse.X, mouse.Y + 50)
+    if aimbotEnabled and fovCircle and settings.showFovCircle and not settings.mode360 then
+        fovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
         fovCircle.Visible = true
-        
         if settings.rainbowFov then
             hue = (hue + rainbowSpeed) % 1
             fovCircle.Color = Color3.fromHSV(hue, 1, 1)
-        elseif aiming and currentTarget then
-            fovCircle.Color = settings.targetedColor
-        else
-            fovCircle.Color = settings.fovColor
-        end
-    elseif fovCircle then
-        fovCircle.Visible = false
-    end
-    
+        elseif aiming and currentTarget then fovCircle.Color = settings.targetedColor
+        else fovCircle.Color = settings.fovColor end
+    elseif fovCircle then fovCircle.Visible = false end
+    if aim2Enabled and fovCircle2 and settings.aim2ShowFovCircle and not settings.aim2Mode360 then
+        fovCircle2.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
+        fovCircle2.Visible = true
+        if settings.aim2RainbowFov then
+            hue = (hue + rainbowSpeed) % 1
+            fovCircle2.Color = Color3.fromHSV(hue, 1, 1)
+        elseif aim2ing and aim2Target then fovCircle2.Color = settings.aim2TargetedColor
+        else fovCircle2.Color = settings.aim2FovColor end
+    elseif fovCircle2 then fovCircle2.Visible = false end
+    if silentAim.MasterEnabled and silentFovCircle and silentAim.ShowFovCircle and not silentAim.Mode360 then
+        silentFovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
+        silentFovCircle.Radius = silentAim.FOV
+        silentFovCircle.Color = silentAim.FovColor
+        silentFovCircle.Visible = silentAim.Enabled
+    elseif silentFovCircle then silentFovCircle.Visible = false end
     if aiming then
         local t = tick()
-        
-        if settings.stickyAim and currentTarget then
-            local character = currentTarget.Character
-            if character then
-                local targetPart = getBestAimPart(character)
-                if targetPart then
-                    local sp = camera:WorldToViewportPoint(targetPart.Position)
-                    local dist = (Vector2.new(sp.X, sp.Y) - Vector2.new(mouse.X, mouse.Y)).Magnitude
-                    if dist > settings.fov * 1.5 or not isVisible(character) then
-                        currentTarget = nil
-                    end
-                else
-                    currentTarget = nil
-                end
-            else
-                currentTarget = nil
-            end
-        end
-        
-        if (not settings.stickyAim or not currentTarget) and (t - lastTargetUpdate > targetUpdateInterval) then
-            lastTargetUpdate = t
-            currentTarget = getTarget()
-        end
-        
+        if t - lastTargetUpdate > 0.05 then lastTargetUpdate = t; currentTarget = getTarget() end
         if currentTarget then aimAtTarget(currentTarget) end
-    else
-        currentTarget = nil
+    else currentTarget = nil end
+    if aim2ing then
+        local t = tick()
+        if t - lastTarget2Update > 0.05 then lastTarget2Update = t; aim2Target = getTarget2() end
+        if aim2Target then aimAtTarget2(aim2Target) end
+    else aim2Target = nil end
+end))
+
+__regConn(RunService.Heartbeat:Connect(function(dt)
+    if colors.RainbowSkin and shindoEvent then
+        skinTimer = skinTimer + dt
+        if skinTimer >= 0.1 then
+            skinTimer = 0
+            local h = (tick() * colors.SkinSpeed) % 1
+            local c = Color3.fromHSV(h, 1, 1)
+            local str = prepareColor(c.R*255, c.G*255, c.B*255)
+            pcall(function() shindoEvent:FireServer("skin", str) end)
+        end
+    end
+    if colors.RainbowHair and shindoEvent then
+        hairTimer = hairTimer + dt
+        if hairTimer >= 0.1 then
+            hairTimer = 0
+            local h = (tick() * colors.HairSpeed) % 1
+            local c = Color3.fromHSV(h, 1, 1)
+            local str = prepareColor(c.R*255, c.G*255, c.B*255)
+            pcall(function() shindoEvent:FireServer("haircolor", str) end)
+        end
+    end
+end))
+
+__regConn(LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(2)
+    if ESP.Enabled then rebuildESP() end
+    if lowDetailState.Enabled then
+        task.wait(1)
+        applyLowDetailAll()
+    end
+end))
+
+--> [< UI SETTINGS >] <--
+pcall(function()
+    if SaveManager then
+        SaveManager:SetLibrary(Fluent)
+        SaveManager:IgnoreThemeSettings()
+        SaveManager:SetIgnoreIndexes({})
+        SaveManager:SetFolder("Flumium/Configs")
+        SaveManager:BuildConfigSection(Tabs.UI)
+        SaveManager:LoadAutoloadConfig()
+    end
+    if InterfaceManager then
+        InterfaceManager:SetLibrary(Fluent)
+        InterfaceManager:SetFolder("Flumium")
+        InterfaceManager:BuildInterfaceSection(Tabs.UI)
     end
 end)
 
---> [< АВТОЗАГРУЗКА >] <--
+-- ============================================================
+-- UNLOAD-ХУКИ
+-- ============================================================
+__regFn(function()
+    aimbotEnabled = false
+    aiming = false
+    currentTarget = nil
+    aim2Enabled = false
+    aim2ing = false
+    aim2Target = nil
+    silentAim.MasterEnabled = false
+    silentAim.Enabled = false
+    silentAim.CachedTarget = nil
+    silentAim.CachedCFrame = nil
+    markerClick.Enabled = false
+end)
 
-if autoExecData and autoExecData.autoLoad and autoExecData.lastConfig and autoExecData.lastConfig ~= "" then
-    task.wait(0.5)
-    local ok = loadConfig(autoExecData.lastConfig)
-    if ok then
-        print("🚀 Auto-Load: " .. autoExecData.lastConfig)
-    end
-end
+__regFn(function()
+    if type(disableSilentHook) == "function" then pcall(disableSilentHook) end
+    if type(disableKunaiHook)  == "function" then pcall(disableKunaiHook)  end
+end)
+
+__regFn(function()
+    ESP.Enabled = false
+    ESP.Visible = false
+    for p in pairs(espData) do clearPlayer(p) end
+end)
+
+__regFn(function()
+    fastDeactivateLowDetail()
+end)
+
+__regFn(function()
+    colors.RainbowSkin = false
+    colors.RainbowHair = false
+end)
+
+__regFn(function()
+    pcall(function() Window:Destroy() end)
+    pcall(function()
+        local pg = LocalPlayer:FindFirstChild("PlayerGui")
+        if pg then local f = pg:FindFirstChild("Fluent"); if f then f:Destroy() end end
+    end)
+    pcall(function()
+        local cg = game:GetService("CoreGui")
+        if cg then local f = cg:FindFirstChild("Fluent"); if f then f:Destroy() end end
+    end)
+end)
+
+__regFn(function()
+    if fovCircle       then pcall(function() fovCircle:Remove()       end) end
+    if fovCircle2      then pcall(function() fovCircle2:Remove()      end) end
+    if silentFovCircle then pcall(function() silentFovCircle:Remove() end) end
+    getgenv().Flumium_Drawing_Fov1 = nil
+    getgenv().Flumium_Drawing_Fov2 = nil
+    getgenv().Flumium_Drawing_FovS = nil
+end)
 
 print("====================================")
-print("✅ Universal Aimbot загружен!")
-print("📁 Конфиги: workspace/" .. CONFIGS_FOLDER)
+print("✅ Flumium Client v1.1 загружен!")
+print("🔁 Повторный execute → старый экземпляр выгружается автоматически")
+print("🌐 Rejoin → cleanup пропускается (JobId-aware)")
+print("💾 Fluent кэшируется локально → работает даже без github")
+print("🎯 Aimbot 2: клавиша [1], целится ВЫШЕ ГОЛОВЫ")
+print("👁️ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД")
 print("📌 RightControl - скрыть меню")
-print("📌 \\ - активация аимбота")
 print("====================================")
