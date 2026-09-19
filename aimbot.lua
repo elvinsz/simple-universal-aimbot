@@ -2,9 +2,26 @@
     Universal Shindo Cheat v11.0
     ✅ Второй аимбот на клавишу "1" (целится выше головы)
     ✅ ESP упрощён: HP зелёным, MD фиолетовым, Dodge text ON/КД
+    ✅ Защита от повторного запуска с уведомлением
+    ✅ Убран кейбинд с ESP (только тоггл)
 ]]
 
-if getgenv().UniversalShindoLoaded then return end
+-- ✅ Защита от повторного запуска с уведомлением
+if getgenv().UniversalShindoLoaded then
+    pcall(function()
+        local FluentCheck = getgenv().Fluent
+        if FluentCheck and FluentCheck.Notify then
+            FluentCheck:Notify({
+                Title = "⚠️ Уже загружено",
+                Content = "Universal Shindo v11.0 уже запущен!",
+                Duration = 3
+            })
+        else
+            print("⚠️ Universal Shindo v11.0 уже загружен!")
+        end
+    end)
+    return
+end
 getgenv().UniversalShindoLoaded = true
 
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -12,6 +29,7 @@ local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/d
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
 if not Fluent then return end
+getgenv().Fluent = Fluent
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -113,8 +131,6 @@ local ESP = {
     ShowHP    = true,
     ShowMD    = true,
     ShowDodge = true,
-    Keybind   = Enum.KeyCode.One,
-    ListeningForBind = false,
     NameColor = Color3.fromRGB(255, 255, 255),
     HPColor   = Color3.fromRGB(0, 255, 0),      -- ✅ Зелёный
     MDColor   = Color3.fromRGB(200, 100, 255),  -- ✅ Фиолетовый
@@ -1297,7 +1313,7 @@ Tabs.Silent:AddButton({
     end
 })
 
---> [< ESP TAB (упрощённый) >] <--
+--> [< ESP TAB (упрощённый, без кейбинда) >] <--
 
 Tabs.ESP:AddToggle("ESPOn", {
     Title = "Enable ESP",
@@ -1315,15 +1331,6 @@ Tabs.ESP:AddToggle("ESPOn", {
         for p in pairs(espData) do clearPlayer(p) end
     end
 end)
-
-local espBindBtn
-espBindBtn = Tabs.ESP:AddButton({
-    Title = "🎹 ESP Keybind: " .. ESP.Keybind.Name,
-    Callback = function()
-        ESP.ListeningForBind = true
-        pcall(function() espBindBtn:SetTitle("🎹 Нажмите...") end)
-    end
-})
 
 Tabs.ESP:AddToggle("EspName", {Title = "Show Name", Default = true}):OnChanged(function(v) ESP.ShowName = v; rebuildESP() end)
 Tabs.ESP:AddToggle("EspHP", {Title = "Show HP (green)", Default = true}):OnChanged(function(v) ESP.ShowHP = v; rebuildESP() end)
@@ -1479,29 +1486,6 @@ end)
 
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
-    
-    -- ESP Keybind
-    if ESP.ListeningForBind then
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            ESP.Keybind = input.KeyCode
-            ESP.ListeningForBind = false
-            pcall(function() espBindBtn:SetTitle("🎹 ESP Keybind: " .. input.KeyCode.Name) end)
-        end
-        return
-    end
-    
-    if input.KeyCode == ESP.Keybind then
-        ESP.Visible = not ESP.Visible
-        ESP.Enabled = ESP.Visible
-        if ESP.Visible then
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and p.Character then espWatch(p) end
-            end
-            rebuildESP()
-        else
-            for p in pairs(espData) do clearPlayer(p) end
-        end
-    end
     
     -- Marker bind
     if markerClick.ListeningForBind then
