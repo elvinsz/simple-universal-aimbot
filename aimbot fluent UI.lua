@@ -1,20 +1,58 @@
 --[[
-    Universal Shindo Cheat v11.3
-    ✅ Второй аимбот на клавишу "1" (целится выше головы)
-    ✅ ESP упрощён: HP зелёным, MD фиолетовым, Dodge text ON/КД
-    ✅ FIX: cleanup-aware запуск — не ломает autoexec после rejoin
-    ✅ Server: Job ID + история + Random + Region via IP-API
-    ✅ NEW: Pink theme, Ping в шапке Server-таба, ESP без keybind
+    Flumium Client v1.0
+    ✅ Повторный запуск полностью выгружает старый экземпляр
+    ✅ Rejoin/execute не ломается из-за кэша Fluent
+    ✅ Aimbot 2 (клавиша [1]), Silent Aim, Kunai Marker
+    ✅ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД
+    ✅ Server: Job ID + история 10 + Join Last + Random + Region via IP-API
+    ✅ Pink Theme, Ping в шапке Server-таба
+    ✅ Performance: Low Detail Mode + FPS Unlocker
 ]]
 
 -- ============================================================
--- SAFE RE-EXECUTE
+-- UNLOAD PREVIOUS INSTANCE
 -- ============================================================
-if type(getgenv().UniversalShindoCleanup) == "function" then
-    pcall(getgenv().UniversalShindoCleanup)
+if type(getgenv().Flumium_Unload) == "function" then
+    pcall(getgenv().Flumium_Unload)
 end
-getgenv().UniversalShindoCleanup = nil
+getgenv().Flumium_Unload = nil
 
+getgenv().Fluent = nil
+getgenv().SaveManager = nil
+getgenv().InterfaceManager = nil
+if _G then
+    _G.Fluent = nil
+    _G.SaveManager = nil
+    _G.InterfaceManager = nil
+end
+
+pcall(function()
+    local CoreGui = game:GetService("CoreGui")
+    local Players = game:GetService("Players")
+    local pg = Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
+    for _, parent in ipairs({CoreGui, pg}) do
+        if parent then
+            for _, name in ipairs({"Fluent", "FluentUI", "FluentGui", "Flumium"}) do
+                local obj = parent:FindFirstChild(name)
+                if obj then obj:Destroy() end
+            end
+        end
+    end
+end)
+
+for _, key in ipairs({"Flumium_Drawing_Fov1", "Flumium_Drawing_Fov2", "Flumium_Drawing_FovS"}) do
+    local d = getgenv()[key]
+    if d then pcall(function() d:Remove() end) end
+    getgenv()[key] = nil
+end
+
+pcall(function()
+    if type(setfpscap) == "function" then setfpscap(60) end
+end)
+
+-- ============================================================
+-- SAFE RE-EXECUTE TRACKER
+-- ============================================================
 local __CLEANUP = { conns = {}, hooks = {}, insts = {}, fns = {}, done = false }
 local function __regConn(c)  table.insert(__CLEANUP.conns, c);  return c end
 local function __regHook(fn) table.insert(__CLEANUP.hooks, fn) end
@@ -24,14 +62,14 @@ local function __regFn(fn)   table.insert(__CLEANUP.fns, fn)   end
 local function __runCleanup()
     if __CLEANUP.done then return end
     __CLEANUP.done = true
+    for _, c in ipairs(__CLEANUP.conns) do pcall(function() c:Disconnect() end) end
+    for _, fn in ipairs(__CLEANUP.fns) do pcall(fn) end
     for _, fn in ipairs(__CLEANUP.hooks) do pcall(fn) end
-    for _, fn in ipairs(__CLEANUP.fns)   do pcall(fn) end
-    for _, c  in ipairs(__CLEANUP.conns) do pcall(function() c:Disconnect() end) end
-    for _, i  in ipairs(__CLEANUP.insts) do pcall(function() i:Destroy()    end) end
-    __CLEANUP.hooks, __CLEANUP.conns, __CLEANUP.insts, __CLEANUP.fns = {}, {}, {}, {}
-    getgenv().UniversalShindoCleanup = nil
+    for _, i in ipairs(__CLEANUP.insts) do pcall(function() i:Destroy() end) end
+    __CLEANUP.conns, __CLEANUP.fns, __CLEANUP.hooks, __CLEANUP.insts = {}, {}, {}, {}
 end
-getgenv().UniversalShindoCleanup = __runCleanup
+
+getgenv().Flumium_Unload = __runCleanup
 
 -- ============================================================
 -- LOAD UI LIBRARY
@@ -148,15 +186,18 @@ pcall(function()
     silentFovCircle.Transparency = 1; silentFovCircle.Visible = false
 end)
 
+pcall(function()
+    getgenv().Flumium_Drawing_Fov1 = fovCircle
+    getgenv().Flumium_Drawing_Fov2 = fovCircle2
+    getgenv().Flumium_Drawing_FovS = silentFovCircle
+end)
+
 --> [< ПИНГ / РЕГИОН via IP-API >] <--
 local function getPlayerPing()
     local ok, ping = pcall(function() return LocalPlayer:GetNetworkPing() end)
     return ok and ping and math.floor(ping * 1000) or 0
 end
 
--- ✅ Регион сервера по IP через ip-api.com
--- HttpService в Roblox отправляет запросы с IP игрового сервера,
--- поэтому ip-api видит именно IP Roblox-датацентра.
 local __serverLocCache = nil
 local function getServerLocation(force)
     if __serverLocCache and not force then return __serverLocCache end
@@ -174,7 +215,6 @@ local function getServerLocation(force)
     return data
 end
 
--- Клиентская страна (Roblox берёт из IP клиента)
 local function getClientCountry()
     local ok, code = pcall(function()
         return LocalizationService:GetCountryRegionForPlayerAsync(LocalPlayer)
@@ -183,7 +223,6 @@ local function getClientCountry()
     return "??"
 end
 
--- Haversine для приблизительной дистанции
 local function haversine(lat1, lon1, lat2, lon2)
     local R = 6371
     local dLat = math.rad(lat2 - lat1)
@@ -192,7 +231,6 @@ local function haversine(lat1, lon1, lat2, lon2)
     return math.floor(R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a)))
 end
 
--- Приблизительные координаты стран, чтобы посчитать дистанцию до сервера
 local COUNTRY_COORDS = {
     US = {38, -97}, CA = {60, -95}, MX = {23, -102},
     GB = {54, -2}, DE = {51, 10}, FR = {46, 2}, NL = {52, 5},
@@ -290,6 +328,193 @@ local function setNoFog(v)
         Lighting.FogEnd = originalLighting.FogEnd
         Lighting.FogStart = originalLighting.FogStart
     end
+end
+
+--> [< LOW DETAIL MODE + FPS UNLOCKER >] <--
+local lowDetailState = {
+    Enabled = false,
+    RemoveTextures = true, RemoveDecals = true, RemoveParticles = true,
+    RemoveShadows = true, PlasticMaterial = true,
+    DisablePostFX = true, FogDistance = true, WaterOptimize = true,
+    FpsUnlocked = false, FpsCap = 240,
+    ModifiedParts = {}, ModifiedDecals = {}, ModifiedTextures = {}, ModifiedParticles = {},
+    DescConn = nil,
+}
+
+local function applyLowDetailToObject(obj)
+    if not lowDetailState.Enabled then return end
+    pcall(function()
+        if obj:IsA("BasePart") then
+            if lowDetailState.PlasticMaterial and obj.Material ~= Enum.Material.Plastic then
+                table.insert(lowDetailState.ModifiedParts, {obj = obj, prop = "Material", value = obj.Material})
+                obj.Material = Enum.Material.Plastic
+            end
+            if lowDetailState.RemoveShadows and obj.CastShadow then
+                table.insert(lowDetailState.ModifiedParts, {obj = obj, prop = "CastShadow", value = true})
+                obj.CastShadow = false
+            end
+        elseif obj:IsA("Decal") and lowDetailState.RemoveDecals then
+            table.insert(lowDetailState.ModifiedDecals, {obj = obj, value = obj.Transparency})
+            obj.Transparency = 1
+        elseif obj:IsA("Texture") and lowDetailState.RemoveTextures then
+            table.insert(lowDetailState.ModifiedTextures, {obj = obj, value = obj.Transparency})
+            obj.Transparency = 1
+        elseif (obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") or obj:IsA("Beam")) and lowDetailState.RemoveParticles then
+            table.insert(lowDetailState.ModifiedParticles, {obj = obj, value = obj.Enabled})
+            obj.Enabled = false
+        end
+    end)
+end
+
+local function applyLowDetailAll()
+    if not lowDetailState.Enabled then return end
+    task.spawn(function()
+        local count = 0
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            applyLowDetailToObject(obj)
+            count += 1
+            if count % 500 == 0 then task.wait() end
+        end
+    end)
+    pcall(function()
+        if lowDetailState.DisablePostFX then
+            for _, e in ipairs(Lighting:GetChildren()) do
+                if e:IsA("PostEffect") then e.Enabled = false end
+            end
+        end
+        if lowDetailState.FogDistance then
+            Lighting.FogEnd = 1e9; Lighting.FogStart = 0
+        end
+        Lighting.GlobalShadows = false
+    end)
+    pcall(function()
+        if lowDetailState.WaterOptimize then
+            local terrain = Workspace:FindFirstChildOfClass("Terrain")
+            if terrain then
+                terrain.WaterWaveSize = 0
+                terrain.WaterWaveSpeed = 0
+                terrain.WaterReflectance = 0
+                terrain.WaterTransparency = 1
+            end
+        end
+    end)
+end
+
+local function restoreLowDetail()
+    for _, entry in ipairs(lowDetailState.ModifiedParts) do
+        pcall(function() if entry.obj and entry.obj.Parent then entry.obj[entry.prop] = entry.value end end)
+    end
+    for _, entry in ipairs(lowDetailState.ModifiedDecals) do
+        pcall(function() if entry.obj and entry.obj.Parent then entry.obj.Transparency = entry.value end end)
+    end
+    for _, entry in ipairs(lowDetailState.ModifiedTextures) do
+        pcall(function() if entry.obj and entry.obj.Parent then entry.obj.Transparency = entry.value end end)
+    end
+    for _, entry in ipairs(lowDetailState.ModifiedParticles) do
+        pcall(function() if entry.obj and entry.obj.Parent then entry.obj.Enabled = entry.value end end)
+    end
+    lowDetailState.ModifiedParts = {}
+    lowDetailState.ModifiedDecals = {}
+    lowDetailState.ModifiedTextures = {}
+    lowDetailState.ModifiedParticles = {}
+    pcall(function()
+        Lighting.FogEnd = originalLighting.FogEnd
+        Lighting.FogStart = originalLighting.FogStart
+        Lighting.GlobalShadows = originalLighting.GlobalShadows
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("PostEffect") then e.Enabled = true end
+        end
+    end)
+    pcall(function()
+        local terrain = Workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
+            terrain.WaterWaveSize = 0.15
+            terrain.WaterWaveSpeed = 10
+            terrain.WaterReflectance = 0
+            terrain.WaterTransparency = 0.2
+        end
+    end)
+end
+
+local function fastDeactivateLowDetail()
+    if lowDetailState.Enabled then
+        lowDetailState.Enabled = false
+        if lowDetailState.DescConn then
+            pcall(function() lowDetailState.DescConn:Disconnect() end)
+            lowDetailState.DescConn = nil
+        end
+        pcall(function()
+            Lighting.FogEnd = originalLighting.FogEnd
+            Lighting.FogStart = originalLighting.FogStart
+            Lighting.GlobalShadows = originalLighting.GlobalShadows
+            for _, e in ipairs(Lighting:GetChildren()) do
+                if e:IsA("PostEffect") then e.Enabled = true end
+            end
+        end)
+        pcall(function()
+            local terrain = Workspace:FindFirstChildOfClass("Terrain")
+            if terrain then
+                terrain.WaterWaveSize = 0.15
+                terrain.WaterWaveSpeed = 10
+                terrain.WaterReflectance = 0
+                terrain.WaterTransparency = 0.2
+            end
+        end)
+        lowDetailState.ModifiedParts = {}
+        lowDetailState.ModifiedDecals = {}
+        lowDetailState.ModifiedTextures = {}
+        lowDetailState.ModifiedParticles = {}
+    end
+    if lowDetailState.FpsUnlocked then
+        lowDetailState.FpsUnlocked = false
+        if type(setfpscap) == "function" then pcall(function() setfpscap(60) end) end
+    end
+end
+
+local function startLowDetailWatcher()
+    if lowDetailState.DescConn then return end
+    lowDetailState.DescConn = __regConn(Workspace.DescendantAdded:Connect(function(obj)
+        if lowDetailState.Enabled then
+            task.defer(function() applyLowDetailToObject(obj) end)
+        end
+    end))
+end
+local function stopLowDetailWatcher()
+    if lowDetailState.DescConn then
+        pcall(function() lowDetailState.DescConn:Disconnect() end)
+        lowDetailState.DescConn = nil
+    end
+end
+
+local function setLowDetail(enabled)
+    lowDetailState.Enabled = enabled
+    if enabled then
+        applyLowDetailAll()
+        startLowDetailWatcher()
+    else
+        stopLowDetailWatcher()
+        restoreLowDetail()
+    end
+end
+
+local function setFpsCap(cap)
+    if type(setfpscap) == "function" then
+        pcall(function() setfpscap(cap) end)
+        return true
+    end
+    local ok = pcall(function() settings().Rendering.FramerateCap = cap end)
+    return ok
+end
+local function unlockFps(cap)
+    if lowDetailState.FpsUnlocked then return end
+    lowDetailState.FpsUnlocked = true
+    lowDetailState.FpsCap = cap
+    setFpsCap(cap)
+end
+local function relockFps()
+    if not lowDetailState.FpsUnlocked then return end
+    lowDetailState.FpsUnlocked = false
+    setFpsCap(60)
 end
 
 --> [< ESP >] <--
@@ -874,8 +1099,8 @@ end
 
 --> [< GUI >] <--
 local Window = Fluent:CreateWindow({
-    Title = "Universal Shindo v11.3",
-    SubTitle = "2 Aimbots • Simplified ESP • Server Tools",
+    Title = "Flumium Client v1.0",
+    SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 520),
     Acrylic = true,
@@ -883,9 +1108,6 @@ local Window = Fluent:CreateWindow({
     MinimizeKey = Enum.KeyCode.RightControl
 })
 
--- ============================================================
--- ✅ PINK THEME
--- ============================================================
 pcall(function()
     Window:ModifyTheme({
         {"Window", "Background",        Color3.fromRGB(38, 23, 43)},
@@ -910,14 +1132,15 @@ pcall(function()
 end)
 
 local Tabs = {
-    Aimbot  = Window:AddTab({ Title = "Aimbot 🎯",    Icon = "crosshair" }),
-    Aimbot2 = Window:AddTab({ Title = "Aimbot 2 🎯",  Icon = "target" }),
-    Silent  = Window:AddTab({ Title = "Silent Aim 🎭", Icon = "eye-off" }),
-    ESP     = Window:AddTab({ Title = "ESP 👁️",       Icon = "eye" }),
-    Colors  = Window:AddTab({ Title = "Colors 🎨",    Icon = "palette" }),
-    Visual  = Window:AddTab({ Title = "Visual ✨",    Icon = "sun" }),
-    Server  = Window:AddTab({ Title = "Server 🌐",    Icon = "globe" }),
-    UI      = Window:AddTab({ Title = "UI Settings",  Icon = "settings" })
+    Aimbot      = Window:AddTab({ Title = "Aimbot 🎯",      Icon = "crosshair" }),
+    Aimbot2     = Window:AddTab({ Title = "Aimbot 2 🎯",    Icon = "target" }),
+    Silent      = Window:AddTab({ Title = "Silent Aim 🎭",  Icon = "eye-off" }),
+    ESP         = Window:AddTab({ Title = "ESP 👁️",         Icon = "eye" }),
+    Performance = Window:AddTab({ Title = "Performance ⚡",  Icon = "zap" }),
+    Colors      = Window:AddTab({ Title = "Colors 🎨",      Icon = "palette" }),
+    Visual      = Window:AddTab({ Title = "Visual ✨",      Icon = "sun" }),
+    Server      = Window:AddTab({ Title = "Server 🌐",      Icon = "globe" }),
+    UI          = Window:AddTab({ Title = "UI Settings",    Icon = "settings" })
 }
 local Options = Fluent.Options
 
@@ -964,7 +1187,7 @@ Tabs.Aimbot:AddSlider("Pred", {Title = "Prediction", Default = 6, Min = 0, Max =
 Tabs.Aimbot:AddToggle("WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.wallCheck = v end)
 Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.teamCheck = v end)
 
---> [< ВКЛАДКА AIMBOT 2 (HEADSHOT) >] <--
+--> [< ВКЛАДКА AIMBOT 2 >] <--
 Tabs.Aimbot2:AddParagraph({ Title = "🎯 Aimbot 2 — Headshot", Content = "Целится ВЫШЕ головы. По умолчанию на клавише [1]" })
 Tabs.Aimbot2:AddToggle("Aim2On", {Title = "Enable Aimbot 2", Default = false}):OnChanged(function(v)
     aim2Enabled = v
@@ -1011,7 +1234,6 @@ Tabs.Aimbot2:AddSlider("Aim2Pred", {Title = "Prediction", Default = 6, Min = 0, 
 Tabs.Aimbot2:AddToggle("Aim2WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.aim2WallCheck = v end)
 Tabs.Aimbot2:AddToggle("Aim2TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.aim2TeamCheck = v end)
 
---> [< KUNAI MARKER >] <--
 local markerSection = Tabs.Aimbot2:AddSection("Kunai Marker")
 markerSection:AddToggle("MarkerClick", { Title = "🌀 Enable Marker Hack", Default = false }):OnChanged(function(v)
     markerClick.Enabled = v
@@ -1059,7 +1281,7 @@ Tabs.Silent:AddButton({
     Callback = function() disableSilentHook(); task.wait(0.3); if silentAim.MasterEnabled then enableSilentHook() end end
 })
 
---> [< ESP TAB (без keybind) >] <--
+--> [< ESP TAB >] <--
 Tabs.ESP:AddToggle("ESPOn", {
     Title = "Enable ESP",
     Description = "Показывает HP (зелёный), MD (фиолетовый), Dodge (ON/КД)",
@@ -1118,6 +1340,84 @@ Tabs.ESP:AddButton({
         end
     end
 })
+
+--> [< PERFORMANCE TAB >] <--
+Tabs.Performance:AddParagraph({
+    Title = "⚡ Performance Tools",
+    Content = "Low Detail Mode убирает текстуры, тени и частицы. FPS Unlocker снимает лимит кадров."
+})
+
+local lowDetailSection = Tabs.Performance:AddSection("Low Detail Mode")
+lowDetailSection:AddToggle("LowDetailOn", {
+    Title = "🔻 Low Detail Mode",
+    Description = "Отключает текстуры, decals, частицы, тени, воду, post-processing",
+    Default = false
+}):OnChanged(function(v)
+    setLowDetail(v)
+    if v then Fluent:Notify({Title = "🔻 Low Detail", Content = "Активирован", Duration = 2})
+    else Fluent:Notify({Title = "🔺 Low Detail", Content = "Отключён", Duration = 2}) end
+end)
+lowDetailSection:AddToggle("LDRemoveTextures", { Title = "Remove Textures", Default = true }):OnChanged(function(v)
+    lowDetailState.RemoveTextures = v
+    if lowDetailState.Enabled then setLowDetail(false); task.wait(0.1); setLowDetail(true) end
+end)
+lowDetailSection:AddToggle("LDRemoveDecals", { Title = "Remove Decals", Default = true }):OnChanged(function(v)
+    lowDetailState.RemoveDecals = v
+    if lowDetailState.Enabled then setLowDetail(false); task.wait(0.1); setLowDetail(true) end
+end)
+lowDetailSection:AddToggle("LDRemoveParticles", { Title = "Remove Particles", Default = true }):OnChanged(function(v)
+    lowDetailState.RemoveParticles = v
+    if lowDetailState.Enabled then setLowDetail(false); task.wait(0.1); setLowDetail(true) end
+end)
+lowDetailSection:AddToggle("LDRemoveShadows", { Title = "Remove Shadows", Default = true }):OnChanged(function(v)
+    lowDetailState.RemoveShadows = v
+    if lowDetailState.Enabled then setLowDetail(false); task.wait(0.1); setLowDetail(true) end
+end)
+lowDetailSection:AddToggle("LDPlastic", { Title = "Force Plastic Material", Default = true }):OnChanged(function(v)
+    lowDetailState.PlasticMaterial = v
+    if lowDetailState.Enabled then setLowDetail(false); task.wait(0.1); setLowDetail(true) end
+end)
+lowDetailSection:AddToggle("LDPostFX", { Title = "Disable Post-Processing", Default = true }):OnChanged(function(v) lowDetailState.DisablePostFX = v end)
+lowDetailSection:AddToggle("LDFog", { Title = "Extend Fog Distance", Default = true }):OnChanged(function(v) lowDetailState.FogDistance = v end)
+lowDetailSection:AddToggle("LDWater", { Title = "Optimize Water", Default = true }):OnChanged(function(v) lowDetailState.WaterOptimize = v end)
+
+local fpsSection = Tabs.Performance:AddSection("FPS Unlocker")
+fpsSection:AddToggle("FPSUnlock", {
+    Title = "🚀 Unlock FPS Cap",
+    Description = "Снимает стандартный лимит 60 FPS через setfpscap()",
+    Default = false
+}):OnChanged(function(v)
+    if v then
+        unlockFps(lowDetailState.FpsCap)
+        Fluent:Notify({Title = "🚀 FPS Unlocked", Content = "Cap: " .. lowDetailState.FpsCap, Duration = 3})
+    else
+        relockFps()
+        Fluent:Notify({Title = "🔒 FPS Locked", Content = "Cap: 60", Duration = 2})
+    end
+end)
+fpsSection:AddSlider("FpsCapSlider", {
+    Title = "FPS Cap (if unlocked)", Description = "0 = без лимита",
+    Default = 240, Min = 0, Max = 999, Rounding = 0
+}):OnChanged(function(v)
+    lowDetailState.FpsCap = v
+    if lowDetailState.FpsUnlocked then setFpsCap(v == 0 and 9999 or v) end
+end)
+fpsSection:AddButton({
+    Title = "🔄 Применить FPS Cap",
+    Callback = function()
+        local cap = lowDetailState.FpsCap == 0 and 9999 or lowDetailState.FpsCap
+        setFpsCap(cap)
+        Fluent:Notify({Title = "✅", Content = "FPS Cap = " .. lowDetailState.FpsCap, Duration = 2})
+    end
+})
+local perfStatusPara = Tabs.Performance:AddParagraph({
+    Title = "📊 Status", Content = "Low Detail: OFF | FPS: 60 (locked)"
+})
+__regConn(RunService.Heartbeat:Connect(function()
+    local ld = lowDetailState.Enabled and "ON" or "OFF"
+    local fps = lowDetailState.FpsUnlocked and tostring(lowDetailState.FpsCap) or "60 (locked)"
+    pcall(function() perfStatusPara:SetDesc("Low Detail: " .. ld .. " | FPS: " .. fps) end)
+end))
 
 --> [< COLORS TAB >] <--
 Tabs.Colors:AddToggle("InvertColors", {Title = "Инвертировать цвет", Default = true}):OnChanged(function(v) colors.Invert = v end)
@@ -1184,36 +1484,21 @@ Tabs.Visual:AddToggle("RainL",{Title = "Rainbow Lighting", Default = false}):OnC
 Tabs.Visual:AddToggle("NoFog",{Title = "No Fog", Default = false}):OnChanged(function(v) setNoFog(v) end)
 
 --> [< SERVER TAB >] <--
-
--- ✅ PING / REGION в самом верху Server-таба
-local topPingPara = Tabs.Server:AddParagraph({
-    Title = "📶 Ping / 🌍 Server Region",
-    Content = "Загрузка..."
-})
-local topIpPara = Tabs.Server:AddParagraph({
-    Title = "🖥️ Server IP / Location (via ip-api)",
-    Content = "Загрузка..."
-})
+local topPingPara = Tabs.Server:AddParagraph({ Title = "📶 Ping / 🌍 Server Region", Content = "Загрузка..." })
+local topIpPara = Tabs.Server:AddParagraph({ Title = "🖥️ Server IP / Location (via ip-api)", Content = "Загрузка..." })
 
 task.spawn(function()
     task.wait(0.5)
     local info = getServerLocation()
     local clientCc = getClientCountry()
     local cLat, cLon, cCode = getClientCoords()
-
-    -- Пинг
     local p = getPlayerPing()
     local dot = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
-    pcall(function()
-        topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, clientCc))
-    end)
-
-    -- Сервер IP + регион
+    pcall(function() topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, clientCc)) end)
     if info and info.status == "success" then
         local distText = "?"
         if cLat and cLon and info.lat and info.lon then
-            local km = haversine(cLat, cLon, info.lat, info.lon)
-            distText = km .. " km"
+            distText = haversine(cLat, cLon, info.lat, info.lon) .. " km"
         end
         pcall(function()
             topIpPara:SetDesc(string.format(
@@ -1223,16 +1508,11 @@ task.spawn(function()
             ))
         end)
     else
-        pcall(function()
-            topIpPara:SetDesc("Не удалось получить IP сервера: " .. tostring(info and info.err or "unknown"))
-        end)
+        pcall(function() topIpPara:SetDesc("Не удалось получить IP сервера: " .. tostring(info and info.err or "unknown")) end)
     end
 end)
 
--- ============================================================
--- HISTORY STORAGE
--- ============================================================
-local HISTORY_FILE = "ShindoJobHistory.json"
+local HISTORY_FILE = "FlumiumJobHistory.json"
 local HISTORY_MAX = 10
 local function hasFs()
     return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
@@ -1421,13 +1701,10 @@ jobSection:AddButton({
     end
 })
 
--- ============================================================
--- RANDOM PUBLIC SERVER
--- ============================================================
 local randomSection = Tabs.Server:AddSection("Random Server")
 randomSection:AddParagraph({
     Title = "ℹ️ О регионе",
-    Content = "Roblox не отдаёт регион напрямую. Пинг — приблизительный ориентир: чем ниже, тем ближе сервер."
+    Content = "Roblox не отдаёт регион напрямую. Пинг — приблизительный ориентир."
 })
 local REGION_PRESETS = {
     ["🌍 Any (0–500 ms)"]   = {0, 500},
@@ -1441,8 +1718,7 @@ local minPingSlider, maxPingSlider
 randomSection:AddDropdown("RegionPreset", {
     Title = "🌐 Region Filter (via ping)",
     Values = { "🌍 Any (0–500 ms)", "🇪🇺 Europe (0–90 ms)", "🇺🇸 USA (80–170 ms)", "🌏 Asia (100–250 ms)", "🌎 Far (200–500 ms)" },
-    Default = "🌍 Any (0–500 ms)",
-    Multi = false,
+    Default = "🌍 Any (0–500 ms)", Multi = false,
     Callback = function(v)
         randomState.region = v
         if randomState.useRegionPreset and REGION_PRESETS[v] then
@@ -1456,17 +1732,13 @@ randomSection:AddDropdown("RegionPreset", {
     end
 })
 randomSection:AddToggle("UseRegionPreset", {
-    Title = "Использовать пресет региона",
-    Description = "OFF — пинг задаётся только слайдерами ниже",
-    Default = true
+    Title = "Использовать пресет региона", Default = true
 }):OnChanged(function(v) randomState.useRegionPreset = v end)
 minPingSlider = randomSection:AddSlider("MinPing", { Title = "Min Ping (ms)", Default = 0, Min = 0, Max = 500, Rounding = 0 }):OnChanged(function(v) randomState.minPing = v end)
 maxPingSlider = randomSection:AddSlider("MaxPing", { Title = "Max Ping (ms)", Default = 500, Min = 0, Max = 500, Rounding = 0 }):OnChanged(function(v) randomState.maxPing = v end)
 randomSection:AddSlider("MinPlayers", { Title = "Min Players", Description = "Не заходить в пустые серверы", Default = 1, Min = 0, Max = 50, Rounding = 0 }):OnChanged(function(v) randomState.minPlayers = v end)
 randomSection:AddToggle("ClosestBias", {
-    Title = "Смещение в сторону низкого пинга",
-    Description = "ON — выбор из топ-10 самых близких. OFF — чистая случайность",
-    Default = true
+    Title = "Смещение в сторону низкого пинга", Default = true
 }):OnChanged(function(v) randomState.closestBias = v end)
 
 local function fetchPublicServers()
@@ -1514,17 +1786,12 @@ randomSection:AddButton({
     end
 })
 
--- ============================================================
--- ПИНГ (обновление верхнего параграфа в реальном времени)
--- ============================================================
 __regConn(task.spawn(function()
     while task.wait(1.5) do
         local p = getPlayerPing()
         local dot = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
         local cc = getClientCountry()
-        pcall(function()
-            topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, cc))
-        end)
+        pcall(function() topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, cc)) end)
     end
 end))
 __regConn(task.spawn(function()
@@ -1552,8 +1819,6 @@ end))
 --> [< ГЛАВНЫЙ ЦИКЛ >] <--
 __regConn(UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
-
-    -- Marker bind
     if markerClick.ListeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             markerClick.ModifierKey = input.KeyCode
@@ -1562,7 +1827,6 @@ __regConn(UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
-    -- Silent bind
     if silentAim.ListeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             silentAim.HoldKey = input.KeyCode
@@ -1571,7 +1835,6 @@ __regConn(UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
-    -- Aimbot 1 bind
     if settings.ListeningForAimBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             settings.aimKey = input.KeyCode
@@ -1580,7 +1843,6 @@ __regConn(UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
-    -- Aimbot 2 bind
     if settings.aim2ListeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             settings.aim2Key = input.KeyCode
@@ -1589,19 +1851,15 @@ __regConn(UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
-
-    -- Silent toggle
     if silentAim.MasterEnabled and silentAim.Mode == "Toggle" then
         if input.KeyCode == silentAim.HoldKey then
             silentAim.Enabled = not silentAim.Enabled
         end
     end
-    -- Aimbot 1
     if aimbotEnabled and input.KeyCode == settings.aimKey then
         if settings.aimMode == "Hold" then aiming = true
         else aiming = not aiming; if not aiming then currentTarget = nil end end
     end
-    -- Aimbot 2
     if aim2Enabled and input.KeyCode == settings.aim2Key then
         if settings.aim2Mode == "Hold" then aim2ing = true
         else aim2ing = not aim2ing; if not aim2ing then aim2Target = nil end end
@@ -1624,7 +1882,6 @@ __regConn(RunService.RenderStepped:Connect(function()
         local c = Color3.fromHSV(lightingHue, 1, 1)
         Lighting.Ambient = c; Lighting.OutdoorAmbient = c
     end
-
     if aimbotEnabled and fovCircle and settings.showFovCircle and not settings.mode360 then
         fovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
         fovCircle.Visible = true
@@ -1634,7 +1891,6 @@ __regConn(RunService.RenderStepped:Connect(function()
         elseif aiming and currentTarget then fovCircle.Color = settings.targetedColor
         else fovCircle.Color = settings.fovColor end
     elseif fovCircle then fovCircle.Visible = false end
-
     if aim2Enabled and fovCircle2 and settings.aim2ShowFovCircle and not settings.aim2Mode360 then
         fovCircle2.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
         fovCircle2.Visible = true
@@ -1644,20 +1900,17 @@ __regConn(RunService.RenderStepped:Connect(function()
         elseif aim2ing and aim2Target then fovCircle2.Color = settings.aim2TargetedColor
         else fovCircle2.Color = settings.aim2FovColor end
     elseif fovCircle2 then fovCircle2.Visible = false end
-
     if silentAim.MasterEnabled and silentFovCircle and silentAim.ShowFovCircle and not silentAim.Mode360 then
         silentFovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
         silentFovCircle.Radius = silentAim.FOV
         silentFovCircle.Color = silentAim.FovColor
         silentFovCircle.Visible = silentAim.Enabled
     elseif silentFovCircle then silentFovCircle.Visible = false end
-
     if aiming then
         local t = tick()
         if t - lastTargetUpdate > 0.05 then lastTargetUpdate = t; currentTarget = getTarget() end
         if currentTarget then aimAtTarget(currentTarget) end
     else currentTarget = nil end
-
     if aim2ing then
         local t = tick()
         if t - lastTarget2Update > 0.05 then lastTarget2Update = t; aim2Target = getTarget2() end
@@ -1691,6 +1944,10 @@ end))
 __regConn(LocalPlayer.CharacterAdded:Connect(function()
     task.wait(2)
     if ESP.Enabled then rebuildESP() end
+    if lowDetailState.Enabled then
+        task.wait(1)
+        applyLowDetailAll()
+    end
 end))
 
 --> [< UI SETTINGS >] <--
@@ -1699,14 +1956,50 @@ pcall(function()
     InterfaceManager:SetLibrary(Fluent)
     SaveManager:IgnoreThemeSettings()
     SaveManager:SetIgnoreIndexes({})
-    InterfaceManager:SetFolder("UniversalShindo")
-    SaveManager:SetFolder("UniversalShindo/Configs")
+    InterfaceManager:SetFolder("Flumium")
+    SaveManager:SetFolder("Flumium/Configs")
     InterfaceManager:BuildInterfaceSection(Tabs.UI)
     SaveManager:BuildConfigSection(Tabs.UI)
     SaveManager:LoadAutoloadConfig()
 end)
 
--- Cleanup для GUI / Drawing / ESP
+-- ============================================================
+-- UNLOAD-ХУКИ
+-- ============================================================
+__regFn(function()
+    aimbotEnabled = false
+    aiming = false
+    currentTarget = nil
+    aim2Enabled = false
+    aim2ing = false
+    aim2Target = nil
+    silentAim.MasterEnabled = false
+    silentAim.Enabled = false
+    silentAim.CachedTarget = nil
+    silentAim.CachedCFrame = nil
+    markerClick.Enabled = false
+end)
+
+__regFn(function()
+    if type(disableSilentHook) == "function" then pcall(disableSilentHook) end
+    if type(disableKunaiHook)  == "function" then pcall(disableKunaiHook)  end
+end)
+
+__regFn(function()
+    ESP.Enabled = false
+    ESP.Visible = false
+    for p in pairs(espData) do clearPlayer(p) end
+end)
+
+__regFn(function()
+    fastDeactivateLowDetail()
+end)
+
+__regFn(function()
+    colors.RainbowSkin = false
+    colors.RainbowHair = false
+end)
+
 __regFn(function()
     pcall(function() Window:Destroy() end)
     pcall(function()
@@ -1718,26 +2011,23 @@ __regFn(function()
         if cg then local f = cg:FindFirstChild("Fluent"); if f then f:Destroy() end end
     end)
 end)
+
 __regFn(function()
     if fovCircle       then pcall(function() fovCircle:Remove()       end) end
     if fovCircle2      then pcall(function() fovCircle2:Remove()      end) end
     if silentFovCircle then pcall(function() silentFovCircle:Remove() end) end
+    getgenv().Flumium_Drawing_Fov1 = nil
+    getgenv().Flumium_Drawing_Fov2 = nil
+    getgenv().Flumium_Drawing_FovS = nil
 end)
-__regFn(function() for p in pairs(espData) do clearPlayer(p) end end)
-
-pcall(function() game:BindToClose(__runCleanup) end)
-__regConn(LocalPlayer.AncestryChanged:Connect(function()
-    if not LocalPlayer:IsDescendantOf(game) then __runCleanup() end
-end))
-__regConn(game:GetService("TeleportService").LocalPlayerArrivedFromTeleport:Connect(function()
-    __runCleanup()
-end))
 
 print("====================================")
-print("✅ Universal Shindo v11.3 загружен!")
+print("✅ Flumium Client v1.0 загружен!")
+print("🔁 Повторный execute → старый экземпляр выгружается автоматически")
 print("🎯 Aimbot 2: клавиша [1], целится ВЫШЕ ГОЛОВЫ")
-print("👁️ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД (без keybind)")
-print("🌐 Server: Job ID + история + Random + Region via IP-API")
+print("👁️ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД")
+print("🌐 Server: Job ID + история + Random + Region")
+print("⚡ Performance: Low Detail + FPS Unlocker")
 print("🎨 Pink Theme активна")
 print("📌 RightControl - скрыть меню")
 print("====================================")
