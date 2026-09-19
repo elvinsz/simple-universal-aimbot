@@ -1,9 +1,9 @@
 --[[
-    Flumium Client v1.2
-    ✅ FIX: убраны авторетраи телепорта (больше не «хопает» несколько раз)
-    ✅ FIX: отвязан глобальный TeleportInitFailed — не накапливается
-    ✅ FIX: ping/region loops останавливаются через флаг (а не Disconnect на потоке)
-    ✅ FIX: session token — старый экземпляр не «доигрывает» после rejoin
+    Flumium Client v1.2.1
+    ✅ FIX: pushHistory объявлена до teleportToJob (Server Hop / Random Server снова работают)
+    ✅ Один клик = одна попытка телепорта (без авторетраев)
+    ✅ JobId-aware cleanup, session token, init guard
+    ✅ Fluent кэш локально
     ✅ Aimbot 2 (клавиша [1]), Silent Aim, Kunai Marker
     ✅ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД
     ✅ Server: Job ID + история 10 + Join Last + Random + Region
@@ -54,13 +54,11 @@ else
     __dbg("new server / first run — skipping cleanup")
 end
 
--- Отвязываем старый TeleportInitFailed если был
 if getgenv().Flumium_TeleportFailedConn then
     pcall(function() getgenv().Flumium_TeleportFailedConn:Disconnect() end)
     getgenv().Flumium_TeleportFailedConn = nil
 end
 
--- Останавливаем старые ping/region loops
 getgenv().Flumium_LoopsRunning = false
 
 getgenv().Flumium_Unload = nil
@@ -217,7 +215,98 @@ local Mouse = LocalPlayer:GetMouse()
 local shindoEvent
 pcall(function() shindoEvent = LocalPlayer:WaitForChild("startevent", 8) end)
 
---> [< НАСТРОЙКИ >] <--
+-- ============================================================
+-- HISTORY STORAGE (нужна teleportToJob — объявляем РАНЬШЕ)
+-- ============================================================
+local HISTORY_FILE = "FlumiumJobHistory.json"
+local HISTORY_MAX = 10
+
+local function hasFs()
+    return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+end
+
+local function loadHistory()
+    if not hasFs() then return {} end
+    local ok, exists = pcall(isfile, HISTORY_FILE)
+    if not ok or not exists then return {} end
+    local ok2, content = pcall(readfile, HISTORY_FILE)
+    if not ok2 or type(content) ~= "string" or content == "" then return {} end
+    local ok3, data = pcall(function() return HttpService:JSONDecode(content) end)
+    if not ok3 or type(data) ~= "table" then return {} end
+    return data
+end
+
+local function saveHistory(list)
+    if not hasFs() then return end
+    pcall(function() writefile(HISTORY_FILE, HttpService:JSONEncode(list)) end)
+end
+
+local function pushHistory(jobId)
+    if not jobId or jobId == "" then return loadHistory() end
+    local list = loadHistory()
+    for i = #list, 1, -1 do
+        if list[i].id == jobId then table.remove(list, i) end
+    end
+    table.insert(list, 1, { id = jobId, place = game.PlaceId, players = #Players:GetPlayers(), time = os.time() })
+    while #list > HISTORY_MAX do table.remove(list) end
+    saveHistory(list)
+    return list
+end
+
+local function fmtTime(t)
+    if not t then return "--:--" end
+    local ok, d = pcall(os.date, "*t", t)
+    if not ok or not d then return "--:--" end
+    return string.format("%02d:%02d", d.hour, d.min)
+end
+
+-- ============================================================
+-- TELEPORT (одна попытка, без авторетраев)
+-- ============================================================
+local __teleportBusy = false
+
+local function teleportToJob(targetId, labelText)
+    if __teleportBusy then
+        Fluent:Notify({Title = "⏳", Content = "Телепорт уже в процессе...", Duration = 2})
+        return
+    end
+    if not targetId or targetId == "" then
+        Fluent:Notify({Title = "❌", Content = "Пустой Job ID", Duration = 3})
+        return
+    end
+    if targetId == game.JobId then
+        Fluent:Notify({Title = "ℹ️", Content = "Ты уже на этом сервере", Duration = 3})
+        return
+    end
+
+    __teleportBusy = true
+    pushHistory(game.JobId)
+
+    Fluent:Notify({
+        Title = "➡️ " .. (labelText or "JOIN"),
+        Content = targetId:sub(1, 8) .. "...",
+        Duration = 2
+    })
+
+    task.spawn(function()
+        local ok = pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetId, LocalPlayer)
+        end)
+        if not ok then
+            pcall(function()
+                local opts = Instance.new("TeleportOptions")
+                opts.ServerInstanceId = targetId
+                TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, opts)
+            end)
+        end
+        task.wait(3)
+        __teleportBusy = false
+    end)
+end
+
+-- ============================================================
+-- CONFIG
+-- ============================================================
 local settings = {
     fov = 300, smoothing = 0.15, prediction = 0.065,
     wallCheck = false, teamCheck = false, aimPart = "Auto", aimMode = "Hold",
@@ -281,10 +370,8 @@ local lastTargetUpdate, lastTarget2Update = 0, 0
 local hue, lightingHue = 0, 0
 local rainbowSpeed = 0.005
 
--- Флаги занятости
 local __serverHopBusy = false
 local __randomBusy = false
-local __teleportBusy = false
 
 local ALL_BODY_PARTS = {
     "Head", "HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso",
@@ -1190,47 +1277,6 @@ local function aimAtTarget2(p)
 end
 
 --> [< SERVER FUNCTIONS >] <--
-
--- ✅ Одна попытка телепорта, без авторетраев
-local function teleportToJob(targetId, labelText)
-    if __teleportBusy then
-        Fluent:Notify({Title = "⏳", Content = "Телепорт уже в процессе...", Duration = 2})
-        return
-    end
-    if not targetId or targetId == "" then
-        Fluent:Notify({Title = "❌", Content = "Пустой Job ID", Duration = 3})
-        return
-    end
-    if targetId == game.JobId then
-        Fluent:Notify({Title = "ℹ️", Content = "Ты уже на этом сервере", Duration = 3})
-        return
-    end
-
-    __teleportBusy = true
-    pushHistory(game.JobId)
-
-    Fluent:Notify({
-        Title = "➡️ " .. (labelText or "JOIN"),
-        Content = targetId:sub(1, 8) .. "...",
-        Duration = 2
-    })
-
-    task.spawn(function()
-        local ok = pcall(function()
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetId, LocalPlayer)
-        end)
-        if not ok then
-            pcall(function()
-                local opts = Instance.new("TeleportOptions")
-                opts.ServerInstanceId = targetId
-                TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, opts)
-            end)
-        end
-        task.wait(3)
-        __teleportBusy = false
-    end)
-end
-
 local function serverHop()
     if __serverHopBusy then
         Fluent:Notify({Title = "⏳", Content = "Уже ищу сервер...", Duration = 2})
@@ -1303,7 +1349,7 @@ end
 
 --> [< GUI >] <--
 local Window = Fluent:CreateWindow({
-    Title = "Flumium Client v1.2",
+    Title = "Flumium Client v1.2.1",
     SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 520),
@@ -1716,42 +1762,8 @@ task.spawn(function()
     end
 end)
 
-local HISTORY_FILE = "FlumiumJobHistory.json"
-local HISTORY_MAX = 10
-local function hasFs()
-    return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
-end
-local function loadHistory()
-    if not hasFs() then return {} end
-    local ok, exists = pcall(isfile, HISTORY_FILE)
-    if not ok or not exists then return {} end
-    local ok2, content = pcall(readfile, HISTORY_FILE)
-    if not ok2 or type(content) ~= "string" or content == "" then return {} end
-    local ok3, data = pcall(function() return HttpService:JSONDecode(content) end)
-    if not ok3 or type(data) ~= "table" then return {} end
-    return data
-end
-local function saveHistory(list)
-    if not hasFs() then return end
-    pcall(function() writefile(HISTORY_FILE, HttpService:JSONEncode(list)) end)
-end
-local function pushHistory(jobId)
-    if not jobId or jobId == "" then return loadHistory() end
-    local list = loadHistory()
-    for i = #list, 1, -1 do
-        if list[i].id == jobId then table.remove(list, i) end
-    end
-    table.insert(list, 1, { id = jobId, place = game.PlaceId, players = #Players:GetPlayers(), time = os.time() })
-    while #list > HISTORY_MAX do table.remove(list) end
-    saveHistory(list)
-    return list
-end
-local function fmtTime(t)
-    if not t then return "--:--" end
-    local ok, d = pcall(os.date, "*t", t)
-    if not ok or not d then return "--:--" end
-    return string.format("%02d:%02d", d.hour, d.min)
-end
+-- ⚠️ ВАЖНО: HISTORY_FILE, loadHistory, saveHistory, pushHistory, fmtTime
+-- уже объявлены ВЫШЕ, до teleportToJob. Здесь НЕ дублируем.
 
 Tabs.Server:AddButton({ Title = "🔄 Server Hop", Callback = function() serverHop() end })
 Tabs.Server:AddButton({ Title = "🔁 Rejoin Server", Callback = function() rejoinServer() end })
@@ -1976,7 +1988,7 @@ randomSection:AddButton({
 })
 
 -- ============================================================
--- ФОНОВЫЕ ЦИКЛЫ (останавливаются по флагу, а не через Disconnect)
+-- ФОНОВЫЕ ЦИКЛЫ
 -- ============================================================
 getgenv().Flumium_LoopsRunning = true
 
@@ -2168,7 +2180,6 @@ end)
 -- UNLOAD-ХУКИ
 -- ============================================================
 __regFn(function()
-    -- Останавливаем фоновые циклы
     getgenv().Flumium_LoopsRunning = false
 end)
 
@@ -2235,10 +2246,10 @@ __regFn(function()
 end)
 
 print("====================================")
-print("✅ Flumium Client v1.2 загружен!")
-print("🔁 Один клик на кнопку = одна попытка телепорта")
+print("✅ Flumium Client v1.2.1 загружен!")
+print("🛠️ FIX: Server Hop и Random Server снова работают")
+print("🔁 Один клик = одна попытка телепорта")
 print("🌐 Rejoin → cleanup пропускается (JobId-aware)")
-print("💾 Fluent кэшируется локально")
 print("🎯 Aimbot 2: клавиша [1], целится ВЫШЕ ГОЛОВЫ")
 print("👁️ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД")
 print("📌 RightControl - скрыть меню")
