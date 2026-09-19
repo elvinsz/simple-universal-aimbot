@@ -1,12 +1,50 @@
 --[[
-    Universal Shindo Cheat v11.0
+    Universal Shindo Cheat v11.2
     ✅ Второй аимбот на клавишу "1" (целится выше головы)
     ✅ ESP упрощён: HP зелёным, MD фиолетовым, Dodge text ON/КД
+    ✅ FIX: cleanup-aware запуск — не ломает autoexec после rejoin
+    ✅ Server: Job ID, история 10 серверов, Join Last, Random Server
 ]]
 
-if getgenv().UniversalShindoLoaded then return end
-getgenv().UniversalShindoLoaded = true
+-- ============================================================
+-- SAFE RE-EXECUTE
+-- ============================================================
+if type(getgenv().UniversalShindoCleanup) == "function" then
+    pcall(getgenv().UniversalShindoCleanup)
+end
+getgenv().UniversalShindoCleanup = nil
 
+local __CLEANUP = {
+    conns = {},
+    hooks = {},
+    insts = {},
+    fns   = {},
+    done  = false,
+}
+
+local function __regConn(c)  table.insert(__CLEANUP.conns, c);  return c end
+local function __regHook(fn) table.insert(__CLEANUP.hooks, fn) end
+local function __regInst(i)  table.insert(__CLEANUP.insts, i);  return i end
+local function __regFn(fn)   table.insert(__CLEANUP.fns, fn)   end
+
+local function __runCleanup()
+    if __CLEANUP.done then return end
+    __CLEANUP.done = true
+
+    for _, fn in ipairs(__CLEANUP.hooks) do pcall(fn) end
+    for _, fn in ipairs(__CLEANUP.fns)   do pcall(fn) end
+    for _, c  in ipairs(__CLEANUP.conns) do pcall(function() c:Disconnect() end) end
+    for _, i  in ipairs(__CLEANUP.insts) do pcall(function() i:Destroy()    end) end
+
+    __CLEANUP.hooks, __CLEANUP.conns, __CLEANUP.insts, __CLEANUP.fns = {}, {}, {}, {}
+    getgenv().UniversalShindoCleanup = nil
+end
+
+getgenv().UniversalShindoCleanup = __runCleanup
+
+-- ============================================================
+-- LOAD UI LIBRARY
+-- ============================================================
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
@@ -32,7 +70,6 @@ pcall(function() shindoEvent = LocalPlayer:WaitForChild("startevent", 8) end)
 --> [< НАСТРОЙКИ >] <--
 
 local settings = {
-    -- Aimbot 1 (основной)
     fov = 300,
     smoothing = 0.15,
     prediction = 0.065,
@@ -49,26 +86,24 @@ local settings = {
     fovColor = Color3.fromRGB(255, 0, 0),
     targetedColor = Color3.fromRGB(0, 255, 0),
     rainbowFov = false,
-    
-    -- ✅ Aimbot 2 (Headshot — выше головы)
+
     aim2Fov = 300,
     aim2Smoothing = 0.15,
     aim2Prediction = 0.065,
     aim2WallCheck = false,
     aim2TeamCheck = false,
     aim2Mode = "Hold",
-    aim2Key = Enum.KeyCode.One,  -- клавиша "1" по умолчанию
+    aim2Key = Enum.KeyCode.One,
     aim2ListeningForBind = false,
     aim2ShowFovCircle = true,
     aim2MaxDistance = 0,
     aim2PrioritizeClose = true,
     aim2Mode360 = false,
-    aim2HeightOffset = 3,  -- ✅ Высота над головой
+    aim2HeightOffset = 3,
     aim2FovColor = Color3.fromRGB(255, 165, 0),
     aim2TargetedColor = Color3.fromRGB(255, 255, 0),
     aim2RainbowFov = false,
-    
-    -- Visual
+
     xray = false, fullBright = false, nightVision = false,
     noShadows = false, noBloom = false, noSunRays = false,
     rainbowLighting = false, noFog = false
@@ -101,7 +136,6 @@ local markerClick = {
     HeightOffset = 3
 }
 
--- ✅ Упрощённый ESP
 local ESP = {
     Enabled   = false,
     Visible   = false,
@@ -116,10 +150,10 @@ local ESP = {
     Keybind   = Enum.KeyCode.One,
     ListeningForBind = false,
     NameColor = Color3.fromRGB(255, 255, 255),
-    HPColor   = Color3.fromRGB(0, 255, 0),      -- ✅ Зелёный
-    MDColor   = Color3.fromRGB(200, 100, 255),  -- ✅ Фиолетовый
-    DodgeOnColor = Color3.fromRGB(0, 255, 0),   -- ✅ Зелёный для ON
-    DodgeCDColor = Color3.fromRGB(255, 60, 60), -- ✅ Красный для КД
+    HPColor   = Color3.fromRGB(0, 255, 0),
+    MDColor   = Color3.fromRGB(200, 100, 255),
+    DodgeOnColor = Color3.fromRGB(0, 255, 0),
+    DodgeCDColor = Color3.fromRGB(255, 60, 60),
     Whitelist = {},
 }
 
@@ -287,7 +321,7 @@ local function setNoFog(v)
     end
 end
 
---> [< УПРОЩЁННЫЙ ESP v11 >] <--
+--> [< ESP >] <--
 
 local espData, espConns, espAcc = {}, {}, 0
 
@@ -325,11 +359,10 @@ local function getModeValue(p)
     return 0
 end
 
--- ✅ Проверка Taijutsu Body Dodge
 local function getTaijutsuDodgeInfo(p)
     local keys = p:FindFirstChild("statz") and p.statz:FindFirstChild("keys")
     if not keys then return nil end
-    
+
     for _, slot in ipairs(keys:GetChildren()) do
         if slot:IsA("ValueBase") then
             local nm = string.lower(tostring(slot.Value))
@@ -378,12 +411,11 @@ local function createPlayerESP(p, char)
     if p == LocalPlayer then return end
     if not isWhitelisted(p) then return end
     if espData[p] and espData[p].gui and espData[p].gui.Parent then return end
-    
+
     local head = char:FindFirstChild("Head") or getRoot(char)
     local hum = getHumanoid(char)
     if not head or not hum then return end
-    
-    -- ✅ Простой BillboardGui
+
     local gui = Instance.new("BillboardGui")
     gui.Name = "SimpleESP"
     gui.Size = UDim2.new(0, 200, 0, 90)
@@ -393,30 +425,26 @@ local function createPlayerESP(p, char)
     gui.Adornee = head
     gui.MaxDistance = ESP.Range
     gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-    
+
     local holder = Instance.new("Frame", gui)
     holder.Size = UDim2.fromScale(1, 1)
     holder.BackgroundTransparency = 1
-    
+
     local scale = Instance.new("UIScale", holder)
     scale.Scale = ESP.Size
-    
-    -- Имя
+
     local nameLabel = makeLabel(holder, UDim2.new(1, 0, 0, 20), UDim2.new(0, 0, 0, 0), ESP.NameColor, 16)
     nameLabel.Text = p.Name
-    
-    -- HP (зелёный)
+
     local hpLabel = makeLabel(holder, UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 22), ESP.HPColor, 16)
     hpLabel.Text = "HP: 0"
-    
-    -- MD (фиолетовый)
+
     local mdLabel = makeLabel(holder, UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 42), ESP.MDColor, 16)
     mdLabel.Text = "MD: 0"
-    
-    -- Dodge (ON/КД)
+
     local dodgeLabel = makeLabel(holder, UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 62), ESP.DodgeOnColor, 16)
     dodgeLabel.Text = "DODGE: --"
-    
+
     espData[p] = {
         gui = gui, char = char, head = head, hum = hum,
         nameLabel = nameLabel,
@@ -437,8 +465,7 @@ local function updateESP()
             if d.gui then d.gui.Enabled = false end
             continue
         end
-        
-        -- Обновляем head если нужно
+
         if not d.head or not d.head.Parent then
             d.head = d.char:FindFirstChild("Head") or getRoot(d.char)
             if d.gui then d.gui.Adornee = d.head end
@@ -448,19 +475,17 @@ local function updateESP()
             if d.gui then d.gui.Enabled = false end
             continue
         end
-        
+
         d.gui.Enabled = true
         d.gui.Adornee = d.head
-        
-        -- ✅ Имя
+
         if ESP.ShowName then
             d.nameLabel.Visible = true
             d.nameLabel.Text = p.Name
         else
             d.nameLabel.Visible = false
         end
-        
-        -- ✅ HP зелёным
+
         local hp = math.floor(d.hum.Health)
         if d.hp ~= hp then
             d.hp = hp
@@ -468,8 +493,7 @@ local function updateESP()
         end
         d.hpLabel.Visible = ESP.ShowHP
         d.hpLabel.TextColor3 = ESP.HPColor
-        
-        -- ✅ MD фиолетовым
+
         local md = math.floor(getModeValue(p))
         if d.md ~= md then
             d.md = md
@@ -477,8 +501,7 @@ local function updateESP()
         end
         d.mdLabel.Visible = ESP.ShowMD
         d.mdLabel.TextColor3 = ESP.MDColor
-        
-        -- ✅ Dodge: ON зелёным / КД красным
+
         if ESP.ShowDodge then
             local dodgeInfo = getTaijutsuDodgeInfo(p)
             if dodgeInfo then
@@ -520,26 +543,26 @@ local function espWatch(p)
         for _, c in ipairs(espConns[p]) do pcall(function() c:Disconnect() end) end
     end
     espConns[p] = {}
-    table.insert(espConns[p], p.CharacterAdded:Connect(function(char)
+    table.insert(espConns[p], __regConn(p.CharacterAdded:Connect(function(char)
         if ESP.Enabled and ESP.Visible and isWhitelisted(p) then
             task.defer(function() createPlayerESP(p, char) end)
         end
-    end))
-    table.insert(espConns[p], p.CharacterRemoving:Connect(function() clearPlayer(p) end))
+    end)))
+    table.insert(espConns[p], __regConn(p.CharacterRemoving:Connect(function() clearPlayer(p) end)))
     if p.Character and ESP.Enabled and ESP.Visible and isWhitelisted(p) then
         task.defer(function() createPlayerESP(p, p.Character) end)
     end
 end
 
 for _, p in ipairs(Players:GetPlayers()) do espWatch(p) end
-Players.PlayerAdded:Connect(espWatch)
-Players.PlayerRemoving:Connect(function(p) clearPlayer(p) end)
+__regConn(Players.PlayerAdded:Connect(espWatch))
+__regConn(Players.PlayerRemoving:Connect(function(p) clearPlayer(p) end))
 
-RunService.Heartbeat:Connect(function(dt)
+__regConn(RunService.Heartbeat:Connect(function(dt)
     if not ESP.Enabled or not ESP.Visible then return end
     espAcc += dt
     if espAcc >= ESP.UpdateRate then espAcc = 0; updateESP() end
-end)
+end))
 
 --> [< KUNAI MARKER >] <--
 
@@ -551,23 +574,23 @@ local function getPriorityEnemy()
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
     local myPos = myRoot.Position
-    
+
     local best = nil
     local bestScore = math.huge
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-    
+
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         if settings.teamCheck and p.Team == LocalPlayer.Team then continue end
-        
+
         local char = p.Character
         if not char then continue end
         local hum = char:FindFirstChild("Humanoid")
         if not hum or hum.Health <= 0 then continue end
-        
+
         local root = char:FindFirstChild("HumanoidRootPart")
         local head = char:FindFirstChild("Head")
-        
+
         local aimPos
         if head then
             aimPos = head.Position + Vector3.new(0, markerClick.HeightOffset, 0)
@@ -576,12 +599,12 @@ local function getPriorityEnemy()
         else
             continue
         end
-        
+
         local worldDist = (root and root.Position or aimPos - myPos).Magnitude
         local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
         local screenDist = onScreen and (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude or 9999
         local score = screenDist + (worldDist * 0.1)
-        
+
         if score < bestScore then
             bestScore = score
             best = aimPos
@@ -632,6 +655,8 @@ local kunaiHook = false
 local oldKunaiNamecall = nil
 local kunaiMetaT = nil
 
+local disableKunaiHook -- forward
+
 local function enableKunaiHook()
     if kunaiHook then return end
     local ok, err = pcall(function()
@@ -642,12 +667,12 @@ local function enableKunaiHook()
             local method = getnamecallmethod()
             local args = {...}
             local nameLower = string.lower(tostring(self.Name))
-            
-            local isMarkerEvent = nameLower:find("marker", 1, true) 
-                or nameLower:find("kunai", 1, true) 
+
+            local isMarkerEvent = nameLower:find("marker", 1, true)
+                or nameLower:find("kunai", 1, true)
                 or nameLower:find("namikaze", 1, true)
             local isTeleportEvent = nameLower:find("teleport", 1, true)
-            
+
             if method == "FireServer" and (isMarkerEvent or isTeleportEvent) then
                 if markerClick.Debug then
                     print("[HOOK] " .. tostring(self.Name) .. " | args: " .. #args)
@@ -656,7 +681,7 @@ local function enableKunaiHook()
                         if type(a) == "table" then deepLog(a, "     ", 0) end
                     end
                 end
-                
+
                 if isModifierHeld() then
                     local enemyPos = getPriorityEnemy()
                     if enemyPos then
@@ -681,12 +706,13 @@ local function enableKunaiHook()
         end)
         setreadonly(kunaiMetaT, true)
         kunaiHook = true
+        __regHook(disableKunaiHook)
         print("✅ Kunai Hook установлен")
     end)
     if not ok then warn("❌ Kunai Hook: " .. tostring(err)) end
 end
 
-local function disableKunaiHook()
+disableKunaiHook = function()
     if kunaiMetaT and oldKunaiNamecall then
         pcall(function()
             setreadonly(kunaiMetaT, false)
@@ -703,7 +729,9 @@ local silentHook = false
 local oldNamecall = nil
 local metaT = nil
 
-RunService.Heartbeat:Connect(function()
+local disableSilentHook -- forward
+
+__regConn(RunService.Heartbeat:Connect(function()
     if silentAim.MasterEnabled and silentAim.Mode == "Hold" then
         silentAim.Enabled = UserInputService:IsKeyDown(silentAim.HoldKey)
     end
@@ -712,16 +740,16 @@ RunService.Heartbeat:Connect(function()
         silentAim.CachedCFrame = nil
         return
     end
-    
+
     local best = nil
     local bestScore = math.huge
     local cam = Workspace.CurrentCamera
     local MousePos = cam.ViewportSize / 2
-    
+
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local originPos = myRoot and myRoot.Position or cam.CFrame.Position
-    
+
     for _, p in pairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         local char = p.Character
@@ -729,12 +757,12 @@ RunService.Heartbeat:Connect(function()
         local part = char:FindFirstChild(silentAim.TargetPart)
         local hum = char:FindFirstChildOfClass("Humanoid")
         if not part or not hum or hum.Health <= 0 then continue end
-        
+
         local enemyRoot = char:FindFirstChild("HumanoidRootPart")
         if silentAim.MaxDistance and silentAim.MaxDistance > 0 and enemyRoot then
             if (enemyRoot.Position - originPos).Magnitude > silentAim.MaxDistance then continue end
         end
-        
+
         if silentAim.Mode360 then
             local worldDist = (part.Position - originPos).Magnitude
             if worldDist < bestScore then bestScore = worldDist; best = part end
@@ -755,7 +783,7 @@ RunService.Heartbeat:Connect(function()
         local camPos2 = cam.CFrame.Position
         silentAim.CachedCFrame = CFrame.new(targetPos, targetPos + (targetPos - camPos2).Unit)
     end
-end)
+end))
 
 local function enableSilentHook()
     if silentHook then return end
@@ -779,12 +807,13 @@ local function enableSilentHook()
         end)
         setreadonly(metaT, true)
         silentHook = true
+        __regHook(disableSilentHook)
         print("✅ Silent Aim хук установлен")
     end)
     if not ok then warn("❌ Silent Aim: " .. tostring(err)) end
 end
 
-local function disableSilentHook()
+disableSilentHook = function()
     if metaT and oldNamecall then
         pcall(function()
             setreadonly(metaT, false)
@@ -882,34 +911,33 @@ local function isVisible(char, check)
     return not res or res.Instance:IsDescendantOf(char)
 end
 
--- ✅ Aimbot 1 (основной)
 local function getTarget()
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
     local originPos = myRoot.Position
-    
+
     local bestT, bestS = nil, math.huge
-    
+
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer or isSameTeam(p, settings.teamCheck) then continue end
         local char = p.Character
         if not char then continue end
         local hum = char:FindFirstChild("Humanoid")
         if not hum or hum.Health <= 0 then continue end
-        
+
         local tp = getBestAimPart(char, settings.aimPart)
         if not tp then continue end
         if settings.wallCheck and not isVisible(char, true) then continue end
-        
+
         local enemyRoot = char:FindFirstChild("HumanoidRootPart")
         if settings.maxDistance and settings.maxDistance > 0 and enemyRoot then
             if (enemyRoot.Position - originPos).Magnitude > settings.maxDistance then continue end
         end
-        
+
         local worldDist = (tp.Position - originPos).Magnitude
-        
+
         if settings.mode360 then
             if worldDist < bestS then bestS = worldDist; bestT = p end
         else
@@ -924,38 +952,36 @@ local function getTarget()
     return bestT
 end
 
--- ✅ Aimbot 2 (Headshot — целится выше головы)
 local function getTarget2()
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
     local originPos = myRoot.Position
-    
+
     local bestT, bestS = nil, math.huge
-    
+
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer or isSameTeam(p, settings.aim2TeamCheck) then continue end
         local char = p.Character
         if not char then continue end
         local hum = char:FindFirstChild("Humanoid")
         if not hum or hum.Health <= 0 then continue end
-        
+
         local head = char:FindFirstChild("Head")
         if not head then continue end
-        
-        -- ✅ Целимся ВЫШЕ ГОЛОВЫ
+
         local aimPos = head.Position + Vector3.new(0, settings.aim2HeightOffset, 0)
-        
+
         if settings.aim2WallCheck and not isVisible(char, true) then continue end
-        
+
         local enemyRoot = char:FindFirstChild("HumanoidRootPart")
         if settings.aim2MaxDistance and settings.aim2MaxDistance > 0 and enemyRoot then
             if (enemyRoot.Position - originPos).Magnitude > settings.aim2MaxDistance then continue end
         end
-        
+
         local worldDist = (aimPos - originPos).Magnitude
-        
+
         if settings.aim2Mode360 then
             if worldDist < bestS then bestS = worldDist; bestT = p end
         else
@@ -986,17 +1012,16 @@ local function aimAtTarget2(p)
     local head = p.Character:FindFirstChild("Head")
     if not head then return end
     local rp = p.Character:FindFirstChild("HumanoidRootPart")
-    
-    -- ✅ Целимся выше головы
+
     local aimPos = head.Position + Vector3.new(0, settings.aim2HeightOffset, 0)
     local pos = aimPos + (rp and rp.Velocity * settings.aim2Prediction or Vector3.new())
-    
+
     local cur = Camera.CFrame
     local tgt = CFrame.new(cur.Position, pos)
     Camera.CFrame = cur:Lerp(tgt, math.clamp(1 - settings.aim2Smoothing, 0.05, 1))
 end
 
---> [< SERVER >] <--
+--> [< SERVER FUNCTIONS >] <--
 
 local function serverHop()
     Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск...", Duration = 3})
@@ -1039,8 +1064,8 @@ end
 --> [< GUI >] <--
 
 local Window = Fluent:CreateWindow({
-    Title = "Universal Shindo v11.0",
-    SubTitle = "2 Aimbots • Simplified ESP",
+    Title = "Universal Shindo v11.2",
+    SubTitle = "2 Aimbots • Simplified ESP • Server Tools",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 520),
     Acrylic = true,
@@ -1049,14 +1074,14 @@ local Window = Fluent:CreateWindow({
 })
 
 local Tabs = {
-    Aimbot = Window:AddTab({ Title = "Aimbot 🎯", Icon = "crosshair" }),
+    Aimbot  = Window:AddTab({ Title = "Aimbot 🎯", Icon = "crosshair" }),
     Aimbot2 = Window:AddTab({ Title = "Aimbot 2 🎯", Icon = "target" }),
-    Silent = Window:AddTab({ Title = "Silent Aim 🎭", Icon = "eye-off" }),
-    ESP = Window:AddTab({ Title = "ESP 👁️", Icon = "eye" }),
-    Colors = Window:AddTab({ Title = "Colors 🎨", Icon = "palette" }),
-    Visual = Window:AddTab({ Title = "Visual ✨", Icon = "sun" }),
-    Server = Window:AddTab({ Title = "Server 🌐", Icon = "globe" }),
-    UI = Window:AddTab({ Title = "UI Settings", Icon = "settings" })
+    Silent  = Window:AddTab({ Title = "Silent Aim 🎭", Icon = "eye-off" }),
+    ESP     = Window:AddTab({ Title = "ESP 👁️", Icon = "eye" }),
+    Colors  = Window:AddTab({ Title = "Colors 🎨", Icon = "palette" }),
+    Visual  = Window:AddTab({ Title = "Visual ✨", Icon = "sun" }),
+    Server  = Window:AddTab({ Title = "Server 🌐", Icon = "globe" }),
+    UI      = Window:AddTab({ Title = "UI Settings", Icon = "settings" })
 }
 
 local Options = Fluent.Options
@@ -1173,7 +1198,6 @@ aim2BindButton = Tabs.Aimbot2:AddButton({
     end
 })
 
--- ✅ Высота над головой
 Tabs.Aimbot2:AddSlider("Aim2Height", {
     Title = "📏 Height Above Head (studs)",
     Description = "На сколько studs выше головы целиться",
@@ -1213,7 +1237,7 @@ end)
 Tabs.Aimbot2:AddToggle("Aim2WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.aim2WallCheck = v end)
 Tabs.Aimbot2:AddToggle("Aim2TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.aim2TeamCheck = v end)
 
---> [< KUNAI MARKER (в Aimbot2) >] <--
+--> [< KUNAI MARKER >] <--
 
 local markerSection = Tabs.Aimbot2:AddSection("Kunai Marker")
 
@@ -1297,7 +1321,7 @@ Tabs.Silent:AddButton({
     end
 })
 
---> [< ESP TAB (упрощённый) >] <--
+--> [< ESP TAB >] <--
 
 Tabs.ESP:AddToggle("ESPOn", {
     Title = "Enable ESP",
@@ -1452,34 +1476,485 @@ Tabs.Visual:AddToggle("NoFog", {Title = "No Fog", Default = false}):OnChanged(fu
 
 --> [< SERVER TAB >] <--
 
-Tabs.Server:AddButton({Title = "🔄 Server Hop", Callback = function() serverHop() end})
-Tabs.Server:AddButton({Title = "🔁 Rejoin Server", Callback = function() rejoinServer() end})
-Tabs.Server:AddButton({Title = "⚡ Force Reconnect", Callback = function() forceReconnect() end})
+-- ============================================================
+-- HISTORY STORAGE (последние 10 Job ID, save via writefile)
+-- ============================================================
+local HISTORY_FILE = "ShindoJobHistory.json"
+local HISTORY_MAX = 10
+
+local function hasFs()
+    return type(writefile) == "function"
+       and type(readfile)  == "function"
+       and type(isfile)    == "function"
+end
+
+local function loadHistory()
+    if not hasFs() then return {} end
+    local ok, exists = pcall(isfile, HISTORY_FILE)
+    if not ok or not exists then return {} end
+    local ok2, content = pcall(readfile, HISTORY_FILE)
+    if not ok2 or type(content) ~= "string" or content == "" then return {} end
+    local ok3, data = pcall(function() return HttpService:JSONDecode(content) end)
+    if not ok3 or type(data) ~= "table" then return {} end
+    return data
+end
+
+local function saveHistory(list)
+    if not hasFs() then return end
+    pcall(function()
+        writefile(HISTORY_FILE, HttpService:JSONEncode(list))
+    end)
+end
+
+local function pushHistory(jobId, extra)
+    if not jobId or jobId == "" then return loadHistory() end
+    local list = loadHistory()
+    for i = #list, 1, -1 do
+        if list[i].id == jobId then table.remove(list, i) end
+    end
+    table.insert(list, 1, {
+        id      = jobId,
+        place   = game.PlaceId,
+        players = #Players:GetPlayers(),
+        time    = os.time(),
+    })
+    while #list > HISTORY_MAX do table.remove(list) end
+    saveHistory(list)
+    return list
+end
+
+local function fmtTime(t)
+    if not t then return "--:--" end
+    local ok, d = pcall(os.date, "*t", t)
+    if not ok or not d then return "--:--" end
+    return string.format("%02d:%02d", d.hour, d.min)
+end
+
+-- ============================================================
+-- ТЕЛЕПОРТ ПО JOB ID (общая функция для всех кнопок)
+-- ============================================================
+local function teleportToJob(targetId, labelText)
+    if not targetId or targetId == "" then
+        Fluent:Notify({Title = "❌", Content = "Пустой Job ID", Duration = 3})
+        return
+    end
+    if targetId == game.JobId then
+        Fluent:Notify({Title = "ℹ️", Content = "Ты уже на этом сервере", Duration = 3})
+        return
+    end
+
+    pushHistory(game.JobId)
+
+    Fluent:Notify({
+        Title = "➡️ JOIN",
+        Content = (labelText or "Подключаюсь") .. " → " .. targetId:sub(1, 8) .. "...",
+        Duration = 3
+    })
+
+    task.spawn(function()
+        local ok, err = pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetId, LocalPlayer)
+        end)
+        if not ok then
+            local ok2 = pcall(function()
+                local opts = Instance.new("TeleportOptions")
+                opts.ServerInstanceId = targetId
+                TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, opts)
+            end)
+            if not ok2 then
+                Fluent:Notify({
+                    Title = "❌ JOIN failed",
+                    Content = "Сервер мёртв / приватный / полный. " .. tostring(err):sub(1, 45),
+                    Duration = 5
+                })
+            end
+        end
+    end)
+end
+
+-- ============================================================
+-- БАЗОВЫЕ КНОПКИ (с записью текущего ID в историю)
+-- ============================================================
+Tabs.Server:AddButton({
+    Title = "🔄 Server Hop",
+    Callback = function() pushHistory(game.JobId); serverHop() end
+})
+Tabs.Server:AddButton({
+    Title = "🔁 Rejoin Server",
+    Callback = function() pushHistory(game.JobId); rejoinServer() end
+})
+Tabs.Server:AddButton({
+    Title = "⚡ Force Reconnect",
+    Callback = function() pushHistory(game.JobId); forceReconnect() end
+})
+
+-- ============================================================
+-- JOB ID SYSTEM
+-- ============================================================
+local jobSection = Tabs.Server:AddSection("Job ID")
+
+local jobPara = jobSection:AddParagraph({
+    Title = "📋 Current Job ID",
+    Content = game.JobId ~= "" and game.JobId or "(нет — приватный / offline)"
+})
+
+jobSection:AddButton({
+    Title = "📋 Скопировать текущий Job ID",
+    Description = "Кладёт в буфер ID этого сервера (только публичные)",
+    Callback = function()
+        if game.JobId == "" then
+            Fluent:Notify({Title = "❌", Content = "Job ID недоступен", Duration = 3})
+            return
+        end
+        local ok = pcall(function()
+            if type(setclipboard) == "function" then
+                setclipboard(game.JobId)
+            elseif type(toclipboard) == "function" then
+                toclipboard(game.JobId)
+            else
+                error("no clipboard")
+            end
+        end)
+        if ok then
+            Fluent:Notify({Title = "📋 Скопировано", Content = game.JobId, Duration = 3})
+        else
+            Fluent:Notify({Title = "❌", Content = "Буфер недоступен", Duration = 3})
+        end
+    end
+})
+
+jobSection:AddButton({
+    Title = "🔄 Обновить Job ID",
+    Callback = function()
+        pcall(function()
+            jobPara:SetDesc(game.JobId ~= "" and game.JobId or "(нет — приватный / offline)")
+        end)
+        Fluent:Notify({Title = "🔄", Content = "Job ID обновлён", Duration = 2})
+    end
+})
+
+local jobInputBox = jobSection:AddInput("JobIDInput", {
+    Title = "🔌 Join by Job ID",
+    Description = "Вставь Job ID публичного сервера (сервер должен быть жив)",
+    Placeholder = "e.g. a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+    Default = ""
+})
+
+jobSection:AddButton({
+    Title = "➡️ JOIN по Job ID",
+    Callback = function()
+        local raw = nil
+        pcall(function() raw = jobInputBox.Value end)
+        raw = tostring(raw or ""):gsub("%s", "")
+
+        if raw == "" then
+            Fluent:Notify({Title = "❌", Content = "Введи Job ID", Duration = 3})
+            return
+        end
+        if not raw:match("^%x+$") or #raw < 8 then
+            Fluent:Notify({Title = "❌", Content = "Некорректный Job ID", Duration = 3})
+            return
+        end
+        teleportToJob(raw, "JOIN")
+    end
+})
+
+jobSection:AddButton({
+    Title = "📥 Вставить из буфера",
+    Callback = function()
+        local clip = nil
+        pcall(function()
+            if type(getclipboard) == "function" then
+                clip = getclipboard()
+            end
+        end)
+        clip = tostring(clip or ""):gsub("%s", "")
+        if clip == "" then
+            Fluent:Notify({Title = "❌", Content = "Буфер пуст", Duration = 3})
+            return
+        end
+        pcall(function() jobInputBox:SetValue(clip) end)
+        Fluent:Notify({Title = "📥", Content = "Вставлено: " .. clip:sub(1, 12) .. "...", Duration = 2})
+    end
+})
+
+-- ============================================================
+-- ⏪ JOIN LAST SERVER
+-- ============================================================
+jobSection:AddButton({
+    Title = "⏪ Join Last Server",
+    Description = "Вернуться на предыдущий сервер одним кликом",
+    Callback = function()
+        local list = loadHistory()
+        if #list == 0 then
+            Fluent:Notify({Title = "❌", Content = "История пуста", Duration = 3})
+            return
+        end
+        local target = nil
+        for _, entry in ipairs(list) do
+            if entry.id and entry.id ~= game.JobId then
+                target = entry
+                break
+            end
+        end
+        if not target then
+            Fluent:Notify({Title = "ℹ️", Content = "Нет других серверов в истории", Duration = 3})
+            return
+        end
+        teleportToJob(target.id, "LAST SERVER")
+    end
+})
+
+-- ============================================================
+-- 📚 ИСТОРИЯ (последние 10)
+-- ============================================================
+local historyDisplayMap = {}
+local historyDropdown
+
+local function buildHistoryValues()
+    historyDisplayMap = {}
+    local list = loadHistory()
+    local values = {}
+    if #list == 0 then
+        values[#values + 1] = "(пусто)"
+        return values
+    end
+    for i, e in ipairs(list) do
+        local id = e.id or "?"
+        local short = id:sub(1, 12)
+        local disp = string.format("🕐 %s  |  %s", fmtTime(e.time), short)
+        if historyDisplayMap[disp] then
+            disp = disp .. " (" .. i .. ")"
+        end
+        values[#values + 1] = disp
+        historyDisplayMap[disp] = id
+    end
+    return values
+end
+
+local initialValues = buildHistoryValues()
+
+historyDropdown = jobSection:AddDropdown("JobHistory", {
+    Title = "📚 Последние Job ID",
+    Description = "Выбери запись — подключение произойдёт автоматически",
+    Values = initialValues,
+    Default = initialValues[1] or "(пусто)",
+    Multi = false,
+    Callback = function(selected)
+        local id = historyDisplayMap[selected]
+        if not id or id == "" then return end
+        if id == game.JobId then
+            Fluent:Notify({Title = "ℹ️", Content = "Это текущий сервер", Duration = 3})
+            return
+        end
+        teleportToJob(id, "HISTORY")
+    end
+})
+
+jobSection:AddButton({
+    Title = "♻️ Обновить список истории",
+    Callback = function()
+        pcall(function()
+            historyDropdown:SetValues(buildHistoryValues())
+        end)
+        Fluent:Notify({Title = "♻️", Content = "История обновлена", Duration = 2})
+    end
+})
+
+jobSection:AddButton({
+    Title = "🗑️ Очистить историю",
+    Callback = function()
+        if not hasFs() then
+            Fluent:Notify({Title = "❌", Content = "Executor не поддерживает файлы", Duration = 3})
+            return
+        end
+        pcall(function()
+            if isfile(HISTORY_FILE) then delfile(HISTORY_FILE) end
+        end)
+        pcall(function()
+            historyDropdown:SetValues({"(пусто)"})
+        end)
+        historyDisplayMap = {}
+        Fluent:Notify({Title = "🗑️", Content = "История очищена", Duration = 2})
+    end
+})
+
+-- ============================================================
+-- 🌍 RANDOM PUBLIC SERVER
+-- ============================================================
+local randomSection = Tabs.Server:AddSection("Random Server")
+
+randomSection:AddParagraph({
+    Title = "ℹ️ О регионе",
+    Content = "Roblox не отдаёт регион напрямую. Пинг — приблизительный ориентир: чем ниже, тем ближе сервер к тебе."
+})
+
+local REGION_PRESETS = {
+    ["🌍 Any (0–500 ms)"]   = {0, 500},
+    ["🇪🇺 Europe (0–90 ms)"] = {0, 90},
+    ["🇺🇸 USA (80–170 ms)"]  = {80, 170},
+    ["🌏 Asia (100–250 ms)"] = {100, 250},
+    ["🌎 Far (200–500 ms)"]  = {200, 500},
+}
+
+local randomState = {
+    region = "🌍 Any (0–500 ms)",
+    minPing = 0,
+    maxPing = 500,
+    minPlayers = 1,
+    useRegionPreset = true,
+    closestBias = true,
+}
+
+local minPingSlider, maxPingSlider
+
+randomSection:AddDropdown("RegionPreset", {
+    Title = "🌐 Region Filter (via ping)",
+    Values = {
+        "🌍 Any (0–500 ms)",
+        "🇪🇺 Europe (0–90 ms)",
+        "🇺🇸 USA (80–170 ms)",
+        "🌏 Asia (100–250 ms)",
+        "🌎 Far (200–500 ms)",
+    },
+    Default = "🌍 Any (0–500 ms)",
+    Multi = false,
+    Callback = function(v)
+        randomState.region = v
+        if randomState.useRegionPreset and REGION_PRESETS[v] then
+            randomState.minPing = REGION_PRESETS[v][1]
+            randomState.maxPing = REGION_PRESETS[v][2]
+            pcall(function()
+                minPingSlider:SetValue(randomState.minPing)
+                maxPingSlider:SetValue(randomState.maxPing)
+            end)
+        end
+    end
+})
+
+randomSection:AddToggle("UseRegionPreset", {
+    Title = "Использовать пресет региона",
+    Description = "OFF — пинг задаётся только слайдерами ниже",
+    Default = true
+}):OnChanged(function(v) randomState.useRegionPreset = v end)
+
+minPingSlider = randomSection:AddSlider("MinPing", {
+    Title = "Min Ping (ms)", Default = 0, Min = 0, Max = 500, Rounding = 0
+}):OnChanged(function(v) randomState.minPing = v end)
+
+maxPingSlider = randomSection:AddSlider("MaxPing", {
+    Title = "Max Ping (ms)", Default = 500, Min = 0, Max = 500, Rounding = 0
+}):OnChanged(function(v) randomState.maxPing = v end)
+
+randomSection:AddSlider("MinPlayers", {
+    Title = "Min Players", Description = "Не заходить в пустые серверы",
+    Default = 1, Min = 0, Max = 50, Rounding = 0
+}):OnChanged(function(v) randomState.minPlayers = v end)
+
+randomSection:AddToggle("ClosestBias", {
+    Title = "Смещение в сторону низкого пинга",
+    Description = "ON — выбор из топ-10 самых близких. OFF — чистая случайность",
+    Default = true
+}):OnChanged(function(v) randomState.closestBias = v end)
+
+local function fetchPublicServers()
+    local url = "https://games.roblox.com/v1/games/"
+             .. game.PlaceId
+             .. "/servers/Public?sortOrder=Asc&limit=100"
+    local ok, response = pcall(function() return game:HttpGet(url, true) end)
+    if not ok or type(response) ~= "string" then return {} end
+    local ok2, data = pcall(function() return HttpService:JSONDecode(response) end)
+    if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then return {} end
+    return data.data
+end
+
+local function pickRandomServer()
+    local servers = fetchPublicServers()
+    if #servers == 0 then return nil, "API пуст / недоступно" end
+
+    local candidates = {}
+    for _, s in ipairs(servers) do
+        local id       = s.id
+        local playing  = tonumber(s.playing)    or 0
+        local maxP     = tonumber(s.maxPlayers) or 0
+        local ping     = tonumber(s.ping)       or 999
+        if id
+           and id ~= game.JobId
+           and playing < maxP
+           and playing >= randomState.minPlayers
+           and ping >= randomState.minPing
+           and ping <= randomState.maxPing
+        then
+            candidates[#candidates + 1] = { id = id, ping = ping, playing = playing, maxPlayers = maxP }
+        end
+    end
+
+    if #candidates == 0 then
+        return nil, "Нет серверов под фильтр"
+    end
+
+    table.sort(candidates, function(a, b) return a.ping < b.ping end)
+
+    local pick
+    if randomState.closestBias then
+        local topN = math.min(10, #candidates)
+        pick = candidates[math.random(1, topN)]
+    else
+        pick = candidates[math.random(1, #candidates)]
+    end
+    return pick
+end
+
+randomSection:AddButton({
+    Title = "🎲 Random Server",
+    Description = "Найти живой сервер по заданным фильтрам",
+    Callback = function()
+        Fluent:Notify({Title = "🎲 Поиск", Content = "Опрашиваю список серверов...", Duration = 2})
+        task.spawn(function()
+            local pick, err = pickRandomServer()
+            if not pick then
+                Fluent:Notify({Title = "❌", Content = err or "Не найдено", Duration = 4})
+                return
+            end
+            Fluent:Notify({
+                Title = "🎲 Найден",
+                Content = string.format("%s... | ping %d | %d/%d",
+                    pick.id:sub(1, 8), pick.ping, pick.playing, pick.maxPlayers),
+                Duration = 3
+            })
+            teleportToJob(pick.id, "RANDOM")
+        end)
+    end
+})
+
+-- ============================================================
+-- ПИНГ / РЕГИОН
+-- ============================================================
 
 local pingPara = Tabs.Server:AddParagraph({Title = "📶 Пинг", Content = "..."})
 local regPara = Tabs.Server:AddParagraph({Title = "🌍 Регион", Content = "..."})
 
-task.spawn(function()
+__regConn(task.spawn(function()
     task.wait(1)
     while task.wait(1) do
         local p = getPlayerPing()
         local c = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
         pcall(function() pingPara:SetDesc(c .. " " .. p .. " ms") end)
     end
-end)
+end))
 
-task.spawn(function()
+__regConn(task.spawn(function()
     task.wait(2)
     while task.wait(15) do
         pcall(function() regPara:SetDesc("🌍 " .. getServerRegion()) end)
     end
-end)
+end))
 
 --> [< ГЛАВНЫЙ ЦИКЛ >] <--
 
-UserInputService.InputBegan:Connect(function(input, gp)
+__regConn(UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
-    
+
     -- ESP Keybind
     if ESP.ListeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
@@ -1489,7 +1964,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
-    
+
     if input.KeyCode == ESP.Keybind then
         ESP.Visible = not ESP.Visible
         ESP.Enabled = ESP.Visible
@@ -1502,7 +1977,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
             for p in pairs(espData) do clearPlayer(p) end
         end
     end
-    
+
     -- Marker bind
     if markerClick.ListeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
@@ -1512,7 +1987,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
-    
+
     -- Silent bind
     if silentAim.ListeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
@@ -1522,7 +1997,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
-    
+
     -- Aimbot 1 bind
     if settings.ListeningForAimBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
@@ -1532,8 +2007,8 @@ UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
-    
-    -- ✅ Aimbot 2 bind
+
+    -- Aimbot 2 bind
     if settings.aim2ListeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
             settings.aim2Key = input.KeyCode
@@ -1542,15 +2017,15 @@ UserInputService.InputBegan:Connect(function(input, gp)
         end
         return
     end
-    
+
     -- Silent toggle
     if silentAim.MasterEnabled and silentAim.Mode == "Toggle" then
         if input.KeyCode == silentAim.HoldKey then
             silentAim.Enabled = not silentAim.Enabled
         end
     end
-    
-    -- ✅ Aimbot 1
+
+    -- Aimbot 1
     if aimbotEnabled and input.KeyCode == settings.aimKey then
         if settings.aimMode == "Hold" then
             aiming = true
@@ -1559,8 +2034,8 @@ UserInputService.InputBegan:Connect(function(input, gp)
             if not aiming then currentTarget = nil end
         end
     end
-    
-    -- ✅ Aimbot 2 (клавиша "1")
+
+    -- Aimbot 2
     if aim2Enabled and input.KeyCode == settings.aim2Key then
         if settings.aim2Mode == "Hold" then
             aim2ing = true
@@ -1569,31 +2044,30 @@ UserInputService.InputBegan:Connect(function(input, gp)
             if not aim2ing then aim2Target = nil end
         end
     end
-end)
+end))
 
-UserInputService.InputEnded:Connect(function(input, gp)
+__regConn(UserInputService.InputEnded:Connect(function(input, gp)
     if gp then return end
-    
+
     if aimbotEnabled and settings.aimMode == "Hold" and input.KeyCode == settings.aimKey then
         aiming = false
         currentTarget = nil
     end
-    
-    -- ✅ Aimbot 2
+
     if aim2Enabled and settings.aim2Mode == "Hold" and input.KeyCode == settings.aim2Key then
         aim2ing = false
         aim2Target = nil
     end
-end)
+end))
 
-RunService.RenderStepped:Connect(function()
+__regConn(RunService.RenderStepped:Connect(function()
     if settings.rainbowLighting then
         lightingHue = (lightingHue + 0.005) % 1
         local c = Color3.fromHSV(lightingHue, 1, 1)
         Lighting.Ambient = c
         Lighting.OutdoorAmbient = c
     end
-    
+
     -- Aimbot 1 FOV
     if aimbotEnabled and fovCircle and settings.showFovCircle and not settings.mode360 then
         fovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
@@ -1609,8 +2083,8 @@ RunService.RenderStepped:Connect(function()
     elseif fovCircle then
         fovCircle.Visible = false
     end
-    
-    -- ✅ Aimbot 2 FOV
+
+    -- Aimbot 2 FOV
     if aim2Enabled and fovCircle2 and settings.aim2ShowFovCircle and not settings.aim2Mode360 then
         fovCircle2.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
         fovCircle2.Visible = true
@@ -1625,7 +2099,7 @@ RunService.RenderStepped:Connect(function()
     elseif fovCircle2 then
         fovCircle2.Visible = false
     end
-    
+
     -- Silent FOV
     if silentAim.MasterEnabled and silentFovCircle and silentAim.ShowFovCircle and not silentAim.Mode360 then
         silentFovCircle.Position = Vector2.new(Mouse.X, Mouse.Y + 50)
@@ -1635,7 +2109,7 @@ RunService.RenderStepped:Connect(function()
     elseif silentFovCircle then
         silentFovCircle.Visible = false
     end
-    
+
     -- Aimbot 1
     if aiming then
         local t = tick()
@@ -1647,8 +2121,8 @@ RunService.RenderStepped:Connect(function()
     else
         currentTarget = nil
     end
-    
-    -- ✅ Aimbot 2
+
+    -- Aimbot 2
     if aim2ing then
         local t = tick()
         if t - lastTarget2Update > 0.05 then
@@ -1659,9 +2133,9 @@ RunService.RenderStepped:Connect(function()
     else
         aim2Target = nil
     end
-end)
+end))
 
-RunService.Heartbeat:Connect(function(dt)
+__regConn(RunService.Heartbeat:Connect(function(dt)
     if colors.RainbowSkin and shindoEvent then
         skinTimer = skinTimer + dt
         if skinTimer >= 0.1 then
@@ -1672,7 +2146,7 @@ RunService.Heartbeat:Connect(function(dt)
             pcall(function() shindoEvent:FireServer("skin", str) end)
         end
     end
-    
+
     if colors.RainbowHair and shindoEvent then
         hairTimer = hairTimer + dt
         if hairTimer >= 0.1 then
@@ -1683,12 +2157,12 @@ RunService.Heartbeat:Connect(function(dt)
             pcall(function() shindoEvent:FireServer("haircolor", str) end)
         end
     end
-end)
+end))
 
-LocalPlayer.CharacterAdded:Connect(function()
+__regConn(LocalPlayer.CharacterAdded:Connect(function()
     task.wait(2)
     if ESP.Enabled then rebuildESP() end
-end)
+end))
 
 --> [< UI SETTINGS >] <--
 
@@ -1704,9 +2178,51 @@ pcall(function()
     SaveManager:LoadAutoloadConfig()
 end)
 
+-- ============================================================
+-- CLEANUP ДЛЯ GUI, DRAWINGS, ESP
+-- ============================================================
+__regFn(function()
+    pcall(function() Window:Destroy() end)
+    pcall(function()
+        local pg = LocalPlayer:FindFirstChild("PlayerGui")
+        if pg then
+            local f = pg:FindFirstChild("Fluent")
+            if f then f:Destroy() end
+        end
+    end)
+    pcall(function()
+        local cg = game:GetService("CoreGui")
+        if cg then
+            local f = cg:FindFirstChild("Fluent")
+            if f then f:Destroy() end
+        end
+    end)
+end)
+
+__regFn(function()
+    if fovCircle       then pcall(function() fovCircle:Remove()       end) end
+    if fovCircle2      then pcall(function() fovCircle2:Remove()      end) end
+    if silentFovCircle then pcall(function() silentFovCircle:Remove() end) end
+end)
+
+__regFn(function()
+    for p in pairs(espData) do clearPlayer(p) end
+end)
+
+pcall(function() game:BindToClose(__runCleanup) end)
+__regConn(LocalPlayer.AncestryChanged:Connect(function()
+    if not LocalPlayer:IsDescendantOf(game) then
+        __runCleanup()
+    end
+end))
+__regConn(game:GetService("TeleportService").LocalPlayerArrivedFromTeleport:Connect(function()
+    __runCleanup()
+end))
+
 print("====================================")
-print("✅ Universal Shindo v11.0 загружен!")
+print("✅ Universal Shindo v11.2 загружен!")
 print("🎯 Aimbot 2: клавиша [1], целится ВЫШЕ ГОЛОВЫ")
 print("👁️ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД")
+print("🌐 Server: Job ID + история + Random + Region")
 print("📌 RightControl - скрыть меню")
 print("====================================")
