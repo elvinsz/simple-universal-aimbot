@@ -1,13 +1,10 @@
 --[[
     Flumium Client v1.4
-    Объединённая версия: рабочий ESP + новые функции
-    - Aimbot 1 + Aimbot 2 (выше головы)
-    - Silent Aim, Kunai Marker (мульти-событие)
-    - ESP: привязка к Head, StudsOffset 2.5, HP/MD/Dodge/Name
-    - Low Detail Mode, FPS Unlocker
-    - Server: IP геолокация, Job ID, история, Join Last
-    - Pink Theme, session token, init guard, unload
-    - Кейбинд с ESP УБРАН
+    ✅ Базовая версия: Universal Shindo v10.1 (исправная)
+    ✅ Добавлены новые функции из Flumium Client v1.4
+    ✅ Aimbot 2 (клавиша [1]), Performance, Server Tools
+    ✅ Убран кейбинд с ESP
+    ✅ Название в меню: Flumium Client v1.4 2 Aimbots • ESP • Server Tools • Performance
 ]]
 
 -- ============================================================
@@ -60,6 +57,7 @@ if getgenv().Flumium_TeleportFailedConn then
 end
 
 getgenv().Flumium_LoopsRunning = false
+
 getgenv().Flumium_Unload = nil
 getgenv().Flumium_LastJobId = __currJobId
 getgenv().Fluent = nil
@@ -119,7 +117,7 @@ end
 getgenv().Flumium_Unload = __runCleanup
 
 -- ============================================================
--- LOAD UI LIBRARY (с кэшем)
+-- LOAD UI LIBRARY
 -- ============================================================
 local FLUENT_URL    = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 local FLUENT_CACHE  = "Flumium_Fluent.lua"
@@ -156,19 +154,20 @@ if not FluentSource then
 end
 
 if not FluentSource then
-    warn("[Flumium] Не удалось загрузить Fluent. Проверь доступ к github.com.")
+    warn("[Flumium] ❌ Не удалось загрузить Fluent. Проверь доступ к github.com.")
+    warn("[Flumium]     Можно скачать main.lua вручную → " .. FLUENT_CACHE)
     return
 end
 
 local FluentFn, compileErr = loadstring(FluentSource)
 if type(FluentFn) ~= "function" then
-    warn("[Flumium] Fluent compile error: " .. tostring(compileErr))
+    warn("[Flumium] ❌ Fluent compile error: " .. tostring(compileErr))
     return
 end
 
 local Fluent = FluentFn()
 if type(Fluent) ~= "table" then
-    warn("[Flumium] Fluent() вернул " .. type(Fluent))
+    warn("[Flumium] ❌ Fluent() вернул " .. type(Fluent))
     return
 end
 
@@ -191,6 +190,9 @@ pcall(function()
     end
 end)
 
+if not SaveManager then __dbg("SaveManager — не загружен") end
+if not InterfaceManager then __dbg("InterfaceManager — не загружен") end
+
 -- ============================================================
 -- SERVICES
 -- ============================================================
@@ -202,7 +204,6 @@ local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local LocalizationService = game:GetService("LocalizationService")
 local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -257,6 +258,50 @@ local function fmtTime(t)
 end
 
 -- ============================================================
+-- TELEPORT
+-- ============================================================
+local __teleportBusy = false
+
+local function teleportToJob(targetId, labelText)
+    if __teleportBusy then
+        Fluent:Notify({Title = "⏳", Content = "Телепорт уже в процессе...", Duration = 2})
+        return
+    end
+    if not targetId or targetId == "" then
+        Fluent:Notify({Title = "❌", Content = "Пустой Job ID", Duration = 3})
+        return
+    end
+    if targetId == game.JobId then
+        Fluent:Notify({Title = "ℹ️", Content = "Ты уже на этом сервере", Duration = 3})
+        return
+    end
+
+    __teleportBusy = true
+    pushHistory(game.JobId)
+
+    Fluent:Notify({
+        Title = "➡️ " .. (labelText or "JOIN"),
+        Content = targetId:sub(1, 8) .. "...",
+        Duration = 2
+    })
+
+    task.spawn(function()
+        local ok = pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetId, LocalPlayer)
+        end)
+        if not ok then
+            pcall(function()
+                local opts = Instance.new("TeleportOptions")
+                opts.ServerInstanceId = targetId
+                TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, opts)
+            end)
+        end
+        task.wait(3)
+        __teleportBusy = false
+    end)
+end
+
+-- ============================================================
 -- CONFIG
 -- ============================================================
 local settings = {
@@ -294,23 +339,11 @@ local markerClick = {
     ListeningForBind = false, Debug = false, HeightOffset = 3
 }
 
--- ✅ ESP без кейбинда
 local ESP = {
-    Enabled     = false,
-    Visible     = false,
-    Range       = math.huge,
-    UpdateRate  = 1,
-    Font        = Enum.Font.GothamBlack,
-    Size        = 0.70,
-    Width       = 1.60,
-    Height      = 1.10,
-    ShowName    = true,
-    ShowHPBar   = true,
-    ShowMeter   = true,
-    ShowMD      = true,
-    ShowHPText  = true,
-    ShowDodge   = true,
-    Whitelist   = {},
+    Enabled = false, Visible = false, Range = math.huge, UpdateRate = 1,
+    Font = Enum.Font.GothamBlack, Size = 0.70, Width = 1.60, Height = 1.10,
+    ShowName = true, ShowHPBar = true, ShowMeter = true, ShowMD = true,
+    ShowHPText = true, ShowDodge = true, Whitelist = {},
 }
 
 local colors = { RainbowSkin = false, RainbowHair = false, SkinSpeed = 0.5, HairSpeed = 0.5, Invert = true }
@@ -330,7 +363,6 @@ local hue, lightingHue = 0, 0
 local rainbowSpeed = 0.005
 
 local __serverHopBusy = false
-local __teleportBusy = false
 
 local ALL_BODY_PARTS = {
     "Head", "HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso",
@@ -374,31 +406,34 @@ local function getPlayerPing()
 end
 
 local IP_SERVICES = {
-    { url = "https://api4.my-ip.io/ip.json",     parser = function(data) return data.ip end, raw = "ip" },
-    { url = "https://api.ipify.org?format=json", parser = function(data) return data.ip end, raw = "ip" },
-    { url = "https://ipinfo.io/json",            parser = function(data) return data.ip end, raw = "ip" },
-    { url = "https://api.ip.sb/jsonip",          parser = function(data) return data.ip end, raw = "ip" },
+    { url = "https://api4.my-ip.io/ip.json",     parser = function(data) return data.ip end,     raw = "ip" },
+    { url = "https://api.ipify.org?format=json", parser = function(data) return data.ip end,     raw = "ip" },
+    { url = "https://ipinfo.io/json",            parser = function(data) return data.ip end,     raw = "ip" },
+    { url = "https://api.ip.sb/jsonip",          parser = function(data) return data.ip end,     raw = "ip" },
 }
 
 local function fetchServerIP()
     for i, svc in ipairs(IP_SERVICES) do
-        local ok, resp = pcall(function() return game:HttpGet(svc.url, true) end)
+        local ok, resp = pcall(function()
+            return game:HttpGet(svc.url, true)
+        end)
         if ok and type(resp) == "string" and #resp > 0 then
             local ok2, data = pcall(function() return HttpService:JSONDecode(resp) end)
             if ok2 and type(data) == "table" and data[svc.raw] then
                 local ip = tostring(data[svc.raw])
                 if ip:match("^%d+%.%d+%.%d+%.%d+$") then
-                    __dbg("server IP via " .. svc.url .. " -> " .. ip)
+                    __dbg("server IP via " .. svc.url .. " → " .. ip)
                     return ip
                 end
             end
             local ip = resp:match("(%d+%.%d+%.%d+%.%d+)")
             if ip then
-                __dbg("server IP via " .. svc.url .. " (raw) -> " .. ip)
+                __dbg("server IP via " .. svc.url .. " (raw) → " .. ip)
                 return ip
             end
         end
     end
+    __dbg("server IP: все сервисы упали")
     return nil
 end
 
@@ -406,7 +441,9 @@ local function geolocateIP(ip)
     if not ip or ip == "" then return nil end
     local url = "http://ip-api.com/json/" .. ip
              .. "?fields=status,country,countryCode,region,regionName,city,isp,org,as,lat,lon,timezone,query"
-    local ok, resp = pcall(function() return game:HttpGet(url, true) end)
+    local ok, resp = pcall(function()
+        return game:HttpGet(url, true)
+    end)
     if not ok or type(resp) ~= "string" or resp == "" then
         return { status = "fail", err = "geolocation http failed", query = ip }
     end
@@ -423,18 +460,21 @@ end
 local __serverLocCache = nil
 local function getServerLocation(force)
     if __serverLocCache and not force then return __serverLocCache end
+
     local ip = fetchServerIP()
     if not ip then
         local result = { status = "fail", err = "no server IP" }
         __serverLocCache = result
         return result
     end
+
     local data = geolocateIP(ip)
     if not data then
         local result = { status = "fail", err = "geolocation returned nil", query = ip }
         __serverLocCache = result
         return result
     end
+
     __serverLocCache = data
     return data
 end
@@ -494,6 +534,7 @@ local function setXRay(v)
         end
     end)
 end
+
 local function setFullBright(v)
     settings.fullBright = v
     if v then
@@ -507,6 +548,7 @@ local function setFullBright(v)
         Lighting.ClockTime = originalLighting.ClockTime
     end
 end
+
 local function setNightVision(v)
     settings.nightVision = v
     pcall(function()
@@ -522,7 +564,9 @@ local function setNightVision(v)
         elseif nv then nv.Enabled = false end
     end)
 end
+
 local function setNoShadows(v) settings.noShadows = v; Lighting.GlobalShadows = not v end
+
 local function setNoBloom(v)
     settings.noBloom = v
     pcall(function()
@@ -531,6 +575,7 @@ local function setNoBloom(v)
         end
     end)
 end
+
 local function setNoSunRays(v)
     settings.noSunRays = v
     pcall(function()
@@ -539,6 +584,7 @@ local function setNoSunRays(v)
         end
     end)
 end
+
 local function setRainbowLighting(v)
     settings.rainbowLighting = v
     if not v then
@@ -546,6 +592,7 @@ local function setRainbowLighting(v)
         Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
     end
 end
+
 local function setNoFog(v)
     settings.noFog = v
     if v then
@@ -707,6 +754,7 @@ local function startLowDetailWatcher()
         end
     end))
 end
+
 local function stopLowDetailWatcher()
     if lowDetailState.DescConn then
         pcall(function() lowDetailState.DescConn:Disconnect() end)
@@ -733,12 +781,14 @@ local function setFpsCap(cap)
     local ok = pcall(function() settings().Rendering.FramerateCap = cap end)
     return ok
 end
+
 local function unlockFps(cap)
     if lowDetailState.FpsUnlocked then return end
     lowDetailState.FpsUnlocked = true
     lowDetailState.FpsCap = cap
     setFpsCap(cap)
 end
+
 local function relockFps()
     if not lowDetailState.FpsUnlocked then return end
     lowDetailState.FpsUnlocked = false
@@ -746,7 +796,7 @@ local function relockFps()
 end
 
 -- ============================================================
--- ESP (рабочая версия — привязка к Head, StudsOffset 2.5)
+-- ESP (Universal Shindo version, keybind removed)
 -- ============================================================
 local espData, espConns, espAcc = {}, {}, 0
 local espIconCache = {}
@@ -1067,7 +1117,7 @@ local function updateESP()
             if d.gui then d.gui.Enabled = false end
             continue
         end
-        if not d.head or not d.head.Parent then
+        if not d.head or not d.head.Parent then 
             d.head = d.char:FindFirstChild("Head") or getRoot(d.char)
             if d.gui then d.gui.Adornee = d.head end
         end
@@ -1134,37 +1184,55 @@ end))
 -- KUNAI MARKER HACK
 -- ============================================================
 local savedEnemyPos = nil
+
 local function getPriorityEnemy()
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
     local myPos = myRoot.Position
-    local best, bestScore = nil, math.huge
+    
+    local best = nil
+    local bestScore = math.huge
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         if settings.teamCheck and p.Team == LocalPlayer.Team then continue end
+        
         local char = p.Character
         if not char then continue end
         local hum = char:FindFirstChild("Humanoid")
         if not hum or hum.Health <= 0 then continue end
+        
         local root = char:FindFirstChild("HumanoidRootPart")
         local head = char:FindFirstChild("Head")
+        
         local aimPos
-        if head then aimPos = head.Position + Vector3.new(0, markerClick.HeightOffset, 0)
-        elseif root then aimPos = root.Position + Vector3.new(0, markerClick.HeightOffset + 2, 0)
-        else continue end
+        if head then
+            aimPos = head.Position + Vector3.new(0, markerClick.HeightOffset, 0)
+        elseif root then
+            aimPos = root.Position + Vector3.new(0, markerClick.HeightOffset + 2, 0)
+        else
+            continue
+        end
+        
         local worldDist = (root and root.Position or aimPos - myPos).Magnitude
         local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
         local screenDist = onScreen and (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude or 9999
         local score = screenDist + (worldDist * 0.1)
-        if score < bestScore then bestScore = score; best = aimPos end
+        
+        if score < bestScore then
+            bestScore = score
+            best = aimPos
+        end
     end
+    
     return best
 end
 
 local function deepLog(t, prefix, depth)
-    depth = depth or 0; prefix = prefix or ""
+    depth = depth or 0
+    prefix = prefix or ""
     if depth > 4 then return end
     if type(t) == "table" then
         for k, v in pairs(t) do
@@ -1201,8 +1269,10 @@ local function isModifierHeld()
     return UserInputService:IsKeyDown(markerClick.ModifierKey)
 end
 
-local kunaiHook, oldKunaiNamecall, kunaiMetaT = false, nil, nil
-local disableKunaiHook
+local kunaiHook = false
+local oldKunaiNamecall = nil
+local kunaiMetaT = nil
+
 local function enableKunaiHook()
     if kunaiHook then return end
     local ok, err = pcall(function()
@@ -1213,44 +1283,62 @@ local function enableKunaiHook()
             local method = getnamecallmethod()
             local args = {...}
             local nameLower = string.lower(tostring(self.Name))
-            local isMarkerEvent = nameLower:find("marker", 1, true)
-                or nameLower:find("kunai", 1, true)
+            
+            local isMarkerEvent = nameLower:find("marker", 1, true) 
+                or nameLower:find("kunai", 1, true) 
                 or nameLower:find("namikaze", 1, true)
+            
             local isTeleportEvent = nameLower:find("teleport", 1, true)
+            
             if method == "FireServer" and (isMarkerEvent or isTeleportEvent) then
                 if markerClick.Debug then
                     print("[HOOK] " .. tostring(self.Name) .. " | args: " .. #args)
                     for i, a in ipairs(args) do
                         print("  [" .. i .. "] = " .. typeof(a) .. " " .. tostring(a))
-                        if type(a) == "table" then deepLog(a, "     ", 0) end
+                        if type(a) == "table" then
+                            deepLog(a, "     ", 0)
+                        end
                     end
                 end
+                
                 if isModifierHeld() then
                     local enemyPos = getPriorityEnemy()
                     if enemyPos then
                         savedEnemyPos = enemyPos
+                        
                         for i = 1, #args do
-                            if typeof(args[i]) == "Vector3" then args[i] = enemyPos
-                            elseif typeof(args[i]) == "CFrame" then args[i] = CFrame.new(enemyPos)
-                            elseif type(args[i]) == "table" then args[i] = replaceVectorInTable(args[i], enemyPos, 0) end
+                            if typeof(args[i]) == "Vector3" then
+                                args[i] = enemyPos
+                            elseif typeof(args[i]) == "CFrame" then
+                                args[i] = CFrame.new(enemyPos)
+                            elseif type(args[i]) == "table" then
+                                args[i] = replaceVectorInTable(args[i], enemyPos, 0)
+                            end
                         end
+                        
                         if markerClick.Debug then
-                            print("[HOOK] Подменён " .. tostring(self.Name) .. " -> " .. tostring(enemyPos))
+                            print("[HOOK] ✅ Подменён " .. tostring(self.Name) .. " → " .. tostring(enemyPos))
                         end
+                        
                         return oldKunaiNamecall(self, table.unpack(args))
+                    else
+                        if markerClick.Debug then
+                            print("[HOOK] ⚠️ Враг не найден")
+                        end
                     end
                 end
             end
+            
             return oldKunaiNamecall(self, ...)
         end)
         setreadonly(kunaiMetaT, true)
         kunaiHook = true
-        __regHook(disableKunaiHook)
-        print("[Flumium] Kunai Hook установлен (мульти-событие)")
+        print("✅ Kunai Hook установлен (мульти-событие)")
     end)
-    if not ok then warn("[Flumium] Kunai Hook: " .. tostring(err)) end
+    if not ok then warn("❌ Kunai Hook: " .. tostring(err)) end
 end
-disableKunaiHook = function()
+
+local function disableKunaiHook()
     if kunaiMetaT and oldKunaiNamecall then
         pcall(function()
             setreadonly(kunaiMetaT, false)
@@ -1264,22 +1352,30 @@ end
 -- ============================================================
 -- SILENT AIM
 -- ============================================================
-local silentHook, oldNamecall, metaT = false, nil, nil
-local disableSilentHook
+local silentHook = false
+local oldNamecall = nil
+local metaT = nil
 
 __regConn(RunService.Heartbeat:Connect(function()
     if silentAim.MasterEnabled and silentAim.Mode == "Hold" then
         silentAim.Enabled = UserInputService:IsKeyDown(silentAim.HoldKey)
     end
+    
     if not silentAim.Enabled then
-        silentAim.CachedTarget = nil; silentAim.CachedCFrame = nil; return
+        silentAim.CachedTarget = nil
+        silentAim.CachedCFrame = nil
+        return
     end
-    local best, bestScore = nil, math.huge
+    
+    local best = nil
+    local bestScore = math.huge
     local cam = Workspace.CurrentCamera
     local MousePos = cam.ViewportSize / 2
+    
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local originPos = myRoot and myRoot.Position or cam.CFrame.Position
+    
     for _, p in pairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         local char = p.Character
@@ -1288,28 +1384,31 @@ __regConn(RunService.Heartbeat:Connect(function()
         local hum = char:FindFirstChildOfClass("Humanoid")
         if not part or not hum or hum.Health <= 0 then continue end
         if not part.Parent then continue end
+        
         local enemyRoot = char:FindFirstChild("HumanoidRootPart")
         if silentAim.MaxDistance and silentAim.MaxDistance > 0 and enemyRoot then
             if (enemyRoot.Position - originPos).Magnitude > silentAim.MaxDistance then continue end
         end
+        
         if silentAim.Mode360 then
-            local wd = (part.Position - originPos).Magnitude
-            if wd < bestScore then bestScore = wd; best = part end
+            local worldDist = (part.Position - originPos).Magnitude
+            if worldDist < bestScore then bestScore = worldDist; best = part end
         else
             local pos, vis = cam:WorldToViewportPoint(part.Position)
             if not vis then continue end
-            local sd = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
-            if sd > silentAim.FOV then continue end
-            local wd = (part.Position - originPos).Magnitude
-            local score = silentAim.PrioritizeClose and wd or sd
+            local screenDist = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
+            if screenDist > silentAim.FOV then continue end
+            local worldDist = (part.Position - originPos).Magnitude
+            local score = silentAim.PrioritizeClose and worldDist or screenDist
             if score < bestScore then bestScore = score; best = part end
         end
     end
+
     silentAim.CachedTarget = best
     if silentAim.CachedTarget and silentAim.CachedTarget.Parent then
-        local tp = silentAim.CachedTarget.Position + (silentAim.CachedTarget.Velocity * silentAim.Prediction)
-        local cp = cam.CFrame.Position
-        silentAim.CachedCFrame = CFrame.new(tp, tp + (tp - cp).Unit)
+        local targetPos = silentAim.CachedTarget.Position + (silentAim.CachedTarget.Velocity * silentAim.Prediction)
+        local camPos2 = cam.CFrame.Position
+        silentAim.CachedCFrame = CFrame.new(targetPos, targetPos + (targetPos - camPos2).Unit)
     end
 end))
 
@@ -1335,12 +1434,12 @@ local function enableSilentHook()
         end)
         setreadonly(metaT, true)
         silentHook = true
-        __regHook(disableSilentHook)
-        print("[Flumium] Silent Aim хук установлен")
+        print("✅ Silent Aim хук установлен")
     end)
-    if not ok then warn("[Flumium] Silent Aim: " .. tostring(err)) end
+    if not ok then warn("❌ Silent Aim: " .. tostring(err)) end
 end
-disableSilentHook = function()
+
+local function disableSilentHook()
     if metaT and oldNamecall then
         pcall(function()
             setreadonly(metaT, false)
@@ -1358,14 +1457,20 @@ local function prepareColor(r, g, b)
     r = math.clamp(math.floor(r), 1, 254)
     g = math.clamp(math.floor(g), 1, 254)
     b = math.clamp(math.floor(b), 1, 254)
-    if colors.Invert then r = 255 - r; g = 255 - g; b = 255 - b end
+    if colors.Invert then
+        r = 255 - r; g = 255 - g; b = 255 - b
+    end
     return string.format("%d,%d,%d", r, g, b)
 end
+
 local function setSkinColor(r, g, b)
     if not shindoEvent then return end
     task.spawn(function()
         local char = LocalPlayer.Character
-        if char then char:WaitForChild("Humanoid", 5); char:WaitForChild("Head", 5) end
+        if char then
+            char:WaitForChild("Humanoid", 5)
+            char:WaitForChild("Head", 5)
+        end
         task.wait(0.3)
         local str = prepareColor(r, g, b)
         for i = 1, 3 do
@@ -1375,11 +1480,15 @@ local function setSkinColor(r, g, b)
         end
     end)
 end
+
 local function setHairColor(r, g, b)
     if not shindoEvent then return end
     task.spawn(function()
         local char = LocalPlayer.Character
-        if char then char:WaitForChild("Humanoid", 5); char:WaitForChild("Head", 5) end
+        if char then
+            char:WaitForChild("Humanoid", 5)
+            char:WaitForChild("Head", 5)
+        end
         task.wait(0.3)
         local str = prepareColor(r, g, b)
         for i = 1, 3 do
@@ -1410,11 +1519,13 @@ local function getBestAimPart(char, customPart)
     end
     return best
 end
+
 local function isSameTeam(p, check)
     if not check then return false end
     if not p.Team or not LocalPlayer.Team then return false end
     return p.Team == LocalPlayer.Team
 end
+
 local function isVisible(char, check)
     if not check then return true end
     local part = getBestAimPart(char, "Auto")
@@ -1427,6 +1538,7 @@ local function isVisible(char, check)
     local res = Workspace:Raycast(origin, dir, params)
     return not res or res.Instance:IsDescendantOf(char)
 end
+
 local function getTarget()
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local myChar = LocalPlayer.Character
@@ -1461,6 +1573,7 @@ local function getTarget()
     end
     return bestT
 end
+
 local function getTarget2()
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local myChar = LocalPlayer.Character
@@ -1496,6 +1609,7 @@ local function getTarget2()
     end
     return bestT
 end
+
 local function aimAtTarget(p)
     if not p or not p.Character then return end
     local tp = getBestAimPart(p.Character, settings.aimPart)
@@ -1506,6 +1620,7 @@ local function aimAtTarget(p)
     local tgt = CFrame.new(cur.Position, pos)
     Camera.CFrame = cur:Lerp(tgt, math.clamp(1 - settings.smoothing, 0.05, 1))
 end
+
 local function aimAtTarget2(p)
     if not p or not p.Character then return end
     local head = p.Character:FindFirstChild("Head")
@@ -1521,73 +1636,42 @@ end
 -- ============================================================
 -- SERVER FUNCTIONS
 -- ============================================================
-local function teleportToJob(targetId, labelText)
-    if __teleportBusy then
-        Fluent:Notify({Title = "Телепорт уже в процессе...", Content = "", Duration = 2})
-        return
-    end
-    if not targetId or targetId == "" then
-        Fluent:Notify({Title = "Пустой Job ID", Content = "", Duration = 3})
-        return
-    end
-    if targetId == game.JobId then
-        Fluent:Notify({Title = "Ты уже на этом сервере", Content = "", Duration = 3})
-        return
-    end
-
-    __teleportBusy = true
-    pushHistory(game.JobId)
-
-    Fluent:Notify({ Title = (labelText or "JOIN"), Content = targetId:sub(1, 8) .. "...", Duration = 2 })
-
-    task.spawn(function()
-        local ok = pcall(function()
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetId, LocalPlayer)
-        end)
-        if not ok then
-            pcall(function()
-                local opts = Instance.new("TeleportOptions")
-                opts.ServerInstanceId = targetId
-                TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, opts)
-            end)
-        end
-        task.wait(3)
-        __teleportBusy = false
-    end)
-end
-
 local function serverHop()
     if __serverHopBusy then
-        Fluent:Notify({Title = "Уже ищу сервер...", Content = "", Duration = 2})
+        Fluent:Notify({Title = "⏳", Content = "Уже ищу сервер...", Duration = 2})
         return
     end
     __serverHopBusy = true
-    Fluent:Notify({Title = "Server Hop", Content = "Поиск сервера...", Duration = 2})
+
+    Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск сервера...", Duration = 2})
     task.spawn(function()
         local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
         local ok, response = pcall(function() return game:HttpGet(url, true) end)
         if not ok or type(response) ~= "string" then
-            Fluent:Notify({Title = "Не удалось получить список серверов", Content = "", Duration = 4})
+            Fluent:Notify({Title = "❌", Content = "Не удалось получить список серверов", Duration = 4})
             __serverHopBusy = false
             return
         end
         local ok2, data = pcall(function() return HttpService:JSONDecode(response) end)
         if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then
-            Fluent:Notify({Title = "Ошибка парсинга", Content = "", Duration = 4})
+            Fluent:Notify({Title = "❌", Content = "Ошибка парсинга", Duration = 4})
             __serverHopBusy = false
             return
         end
+
         local avail = {}
         for _, s in ipairs(data.data) do
             if s.playing < s.maxPlayers and s.id ~= game.JobId then
                 table.insert(avail, s.id)
             end
         end
+
         if #avail == 0 then
-            Fluent:Notify({Title = "Нет доступных серверов", Content = "", Duration = 4})
+            Fluent:Notify({Title = "❌", Content = "Нет доступных серверов", Duration = 4})
             __serverHopBusy = false
             return
         end
+
         local targetId = avail[math.random(1, #avail)]
         teleportToJob(targetId, "Server Hop")
         task.wait(3)
@@ -1596,7 +1680,7 @@ local function serverHop()
 end
 
 local function rejoinServer()
-    Fluent:Notify({Title = "Rejoin", Content = "Переподключение...", Duration = 2})
+    Fluent:Notify({Title = "🔁 Rejoin", Content = "Переподключение...", Duration = 2})
     pushHistory(game.JobId)
     task.spawn(function()
         local ok = pcall(function()
@@ -1609,7 +1693,7 @@ local function rejoinServer()
 end
 
 local function forceReconnect()
-    Fluent:Notify({Title = "Force Reconnect", Content = "Принудительное...", Duration = 2})
+    Fluent:Notify({Title = "⚡ Force Reconnect", Content = "Принудительное...", Duration = 2})
     task.spawn(function()
         for i = 1, 3 do
             local ok = pcall(function()
@@ -1623,10 +1707,10 @@ local function forceReconnect()
 end
 
 -- ============================================================
--- GUI (PINK THEME)
+-- GUI
 -- ============================================================
 local Window = Fluent:CreateWindow({
-    Title = "Flumium Client v1.4",
+    Title = "Flumium Client v1.4 2 Aimbots • ESP • Server Tools • Performance",
     SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 520),
@@ -1659,20 +1743,20 @@ pcall(function()
 end)
 
 local Tabs = {
-    Aimbot      = Window:AddTab({ Title = "Aimbot",       Icon = "crosshair" }),
-    Aimbot2     = Window:AddTab({ Title = "Aimbot 2",     Icon = "target" }),
-    Silent      = Window:AddTab({ Title = "Silent Aim",   Icon = "eye-off" }),
-    ESP         = Window:AddTab({ Title = "ESP",          Icon = "eye" }),
-    Performance = Window:AddTab({ Title = "Performance",  Icon = "zap" }),
-    Colors      = Window:AddTab({ Title = "Colors",       Icon = "palette" }),
-    Visual      = Window:AddTab({ Title = "Visual",       Icon = "sun" }),
-    Server      = Window:AddTab({ Title = "Server",       Icon = "globe" }),
-    UI          = Window:AddTab({ Title = "UI Settings",  Icon = "settings" })
+    Aimbot      = Window:AddTab({ Title = "Aimbot 🎯",      Icon = "crosshair" }),
+    Aimbot2     = Window:AddTab({ Title = "Aimbot 2 🎯",    Icon = "target" }),
+    Silent      = Window:AddTab({ Title = "Silent Aim 🎭",  Icon = "eye-off" }),
+    ESP         = Window:AddTab({ Title = "ESP 👁️",         Icon = "eye" }),
+    Performance = Window:AddTab({ Title = "Performance ⚡",  Icon = "zap" }),
+    Colors      = Window:AddTab({ Title = "Colors 🎨",      Icon = "palette" }),
+    Visual      = Window:AddTab({ Title = "Visual ✨",      Icon = "sun" }),
+    Server      = Window:AddTab({ Title = "Server 🌐",      Icon = "globe" }),
+    UI          = Window:AddTab({ Title = "UI Settings",    Icon = "settings" })
 }
 local Options = Fluent.Options
 
 -- ============================================================
--- AIMBOT 1
+-- AIMBOT 1 TAB
 -- ============================================================
 Tabs.Aimbot:AddToggle("AimOn", {Title = "Enable Aimbot", Default = false}):OnChanged(function(v)
     aimbotEnabled = v
@@ -1696,10 +1780,10 @@ Tabs.Aimbot:AddDropdown("AimMode", {Title = "Aim Mode",
 }):OnChanged(function(v) settings.aimMode = (v == "Hold (зажать)") and "Hold" or "Toggle" end)
 local aimBindButton
 aimBindButton = Tabs.Aimbot:AddButton({
-    Title = "BIND: " .. settings.aimKey.Name,
+    Title = "🎹 BIND: " .. settings.aimKey.Name,
     Callback = function()
         settings.ListeningForAimBind = true
-        pcall(function() aimBindButton:SetTitle("Нажмите клавишу...") end)
+        pcall(function() aimBindButton:SetTitle("🎹 Нажмите клавишу...") end)
     end
 })
 Tabs.Aimbot:AddSlider("FOV", {Title = "FOV Size", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(v)
@@ -1707,7 +1791,7 @@ Tabs.Aimbot:AddSlider("FOV", {Title = "FOV Size", Default = 300, Min = 0, Max = 
 end)
 Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance", Description = "0 = без ограничений", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v) settings.maxDistance = v end)
 Tabs.Aimbot:AddToggle("PriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) settings.prioritizeClose = v end)
-Tabs.Aimbot:AddToggle("Mode360", {Title = "360 Mode", Default = false}):OnChanged(function(v)
+Tabs.Aimbot:AddToggle("Mode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
     settings.mode360 = v
     if v and fovCircle then fovCircle.Visible = false end
 end)
@@ -1717,9 +1801,9 @@ Tabs.Aimbot:AddToggle("WallCheck", {Title = "Wall Check", Default = false}):OnCh
 Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.teamCheck = v end)
 
 -- ============================================================
--- AIMBOT 2
+-- AIMBOT 2 TAB
 -- ============================================================
-Tabs.Aimbot2:AddParagraph({ Title = "Aimbot 2 — Headshot", Content = "Целится ВЫШЕ головы. По умолчанию на клавише [1]" })
+Tabs.Aimbot2:AddParagraph({ Title = "🎯 Aimbot 2 — Headshot", Content = "Целится ВЫШЕ головы. По умолчанию на клавише [1]" })
 Tabs.Aimbot2:AddToggle("Aim2On", {Title = "Enable Aimbot 2", Default = false}):OnChanged(function(v)
     aim2Enabled = v
     if fovCircle2 then fovCircle2.Visible = settings.aim2ShowFovCircle and v and not settings.aim2Mode360 end
@@ -1739,15 +1823,15 @@ Tabs.Aimbot2:AddDropdown("Aim2Mode", {Title = "Aim Mode",
 }):OnChanged(function(v) settings.aim2Mode = (v == "Hold (зажать)") and "Hold" or "Toggle" end)
 local aim2BindButton
 aim2BindButton = Tabs.Aimbot2:AddButton({
-    Title = "BIND: " .. settings.aim2Key.Name,
+    Title = "🎹 BIND: " .. settings.aim2Key.Name,
     Description = "Нажмите для смены клавиши (по умолчанию 1)",
     Callback = function()
         settings.aim2ListeningForBind = true
-        pcall(function() aim2BindButton:SetTitle("Нажмите клавишу...") end)
+        pcall(function() aim2BindButton:SetTitle("🎹 Нажмите клавишу...") end)
     end
 })
 Tabs.Aimbot2:AddSlider("Aim2Height", {
-    Title = "Height Above Head (studs)",
+    Title = "📏 Height Above Head (studs)",
     Description = "На сколько studs выше головы целиться",
     Default = 3, Min = 0, Max = 20, Rounding = 0
 }):OnChanged(function(v) settings.aim2HeightOffset = v end)
@@ -1756,7 +1840,7 @@ Tabs.Aimbot2:AddSlider("Aim2FOV", {Title = "FOV Size", Default = 300, Min = 0, M
 end)
 Tabs.Aimbot2:AddSlider("Aim2MaxDist", {Title = "Max Distance", Description = "0 = без ограничений", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v) settings.aim2MaxDistance = v end)
 Tabs.Aimbot2:AddToggle("Aim2PriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) settings.aim2PrioritizeClose = v end)
-Tabs.Aimbot2:AddToggle("Aim2Mode360", {Title = "360 Mode", Default = false}):OnChanged(function(v)
+Tabs.Aimbot2:AddToggle("Aim2Mode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
     settings.aim2Mode360 = v
     if v and fovCircle2 then fovCircle2.Visible = false end
 end)
@@ -1766,25 +1850,25 @@ Tabs.Aimbot2:AddToggle("Aim2WallCheck", {Title = "Wall Check", Default = false})
 Tabs.Aimbot2:AddToggle("Aim2TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.aim2TeamCheck = v end)
 
 local markerSection = Tabs.Aimbot2:AddSection("Kunai Marker")
-markerSection:AddToggle("MarkerClick", { Title = "Enable Marker Hack", Default = false }):OnChanged(function(v)
+markerSection:AddToggle("MarkerClick", { Title = "🌀 Enable Marker Hack", Default = false }):OnChanged(function(v)
     markerClick.Enabled = v
     if v then
         enableKunaiHook()
-        Fluent:Notify({Title = "Marker ВКЛ", Content = "Зажми " .. markerClick.ModifierKey.Name, Duration = 3})
+        Fluent:Notify({Title = "🌀 Marker ВКЛ", Content = "Зажми " .. markerClick.ModifierKey.Name, Duration = 3})
     else
         disableKunaiHook()
     end
 end)
 local markerBindBtn
 markerBindBtn = markerSection:AddButton({
-    Title = "Modifier: " .. markerClick.ModifierKey.Name,
+    Title = "🎹 Modifier: " .. markerClick.ModifierKey.Name,
     Callback = function()
         markerClick.ListeningForBind = true
-        pcall(function() markerBindBtn:SetTitle("Нажмите...") end)
+        pcall(function() markerBindBtn:SetTitle("🎹 Нажмите...") end)
     end
 })
-markerSection:AddSlider("MarkerH", { Title = "Marker Height", Default = 3, Min = 0, Max = 20, Rounding = 0 }):OnChanged(function(v) markerClick.HeightOffset = v end)
-markerSection:AddToggle("MarkerDebug", {Title = "Debug", Default = false}):OnChanged(function(v) markerClick.Debug = v end)
+markerSection:AddSlider("MarkerH", { Title = "📏 Marker Height", Default = 3, Min = 0, Max = 20, Rounding = 0 }):OnChanged(function(v) markerClick.HeightOffset = v end)
+markerSection:AddToggle("MarkerDebug", {Title = "🔍 Debug", Default = false}):OnChanged(function(v) markerClick.Debug = v end)
 
 -- ============================================================
 -- SILENT AIM TAB
@@ -1796,42 +1880,30 @@ end)
 Tabs.Silent:AddDropdown("SilentMode", { Title = "Режим", Values = {"Hold", "Toggle"}, Default = 1 }):OnChanged(function(v) silentAim.Mode = v end)
 local silentBindButton
 silentBindButton = Tabs.Silent:AddButton({
-    Title = "BIND: " .. silentAim.HoldKey.Name,
+    Title = "🎹 BIND: " .. silentAim.HoldKey.Name,
     Callback = function()
         silentAim.ListeningForBind = true
-        pcall(function() silentBindButton:SetTitle("Нажмите...") end)
+        pcall(function() silentBindButton:SetTitle("🎹 Нажмите...") end)
     end
 })
-Tabs.Silent:AddDropdown("SilentPart", {Title = "Target Part",
-    Values = {"HumanoidRootPart", "Head", "UpperTorso", "Torso"}, Default = 1
-}):OnChanged(function(v) silentAim.TargetPart = v end)
 Tabs.Silent:AddSlider("SilentFOV", {Title = "FOV Radius", Default = 500, Min = 50, Max = 2000, Rounding = 0}):OnChanged(function(v)
     silentAim.FOV = v; if silentFovCircle then silentFovCircle.Radius = v end
-end)
-Tabs.Silent:AddToggle("SilentShowFOV", {Title = "Show Silent FOV Circle", Default = true}):OnChanged(function(v) silentAim.ShowFovCircle = v end)
-Tabs.Silent:AddColorpicker("SilentFovColor", {Title = "Silent FOV Color", Default = Color3.fromRGB(100, 200, 255)}):OnChanged(function(c)
-    silentAim.FovColor = c
-    if silentFovCircle then silentFovCircle.Color = c end
 end)
 Tabs.Silent:AddSlider("SilentPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) silentAim.Prediction = v / 100 end)
 Tabs.Silent:AddSlider("SilentMaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v) silentAim.MaxDistance = v end)
 Tabs.Silent:AddToggle("SilentPriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) silentAim.PrioritizeClose = v end)
-Tabs.Silent:AddToggle("SilentMode360", {Title = "360 Mode", Default = false}):OnChanged(function(v)
-    silentAim.Mode360 = v
-    if v and silentFovCircle then silentFovCircle.Visible = false end
-end)
-Tabs.Silent:AddToggle("SilentLog", {Title = "Log FireServer (debug)", Default = false}):OnChanged(function(v) silentAim.Logging = v end)
+Tabs.Silent:AddToggle("SilentMode360", {Title = "360° Mode", Default = false}):OnChanged(function(v) silentAim.Mode360 = v end)
 Tabs.Silent:AddButton({
-    Title = "Переустановить хук",
+    Title = "🔄 Переустановить хук",
     Callback = function() disableSilentHook(); task.wait(0.3); if silentAim.MasterEnabled then enableSilentHook() end end
 })
 
 -- ============================================================
--- ESP TAB (БЕЗ КЕЙБИНДА)
+-- ESP TAB (KEYBIND REMOVED)
 -- ============================================================
 Tabs.ESP:AddToggle("ESPOn", {
     Title = "Enable ESP",
-    Description = "Мастер-включение ESP",
+    Description = "Показывает HP, MD, Dodge иконки",
     Default = false
 }):OnChanged(function(v)
     ESP.Enabled = v
@@ -1868,17 +1940,17 @@ end)
 
 local espWhitelistSection = Tabs.ESP:AddSection("Player Whitelist (пусто = все)")
 Tabs.ESP:AddButton({
-    Title = "Обновить список игроков",
+    Title = "🔄 Обновить список игроков",
     Callback = function()
         local playerList = {}
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer then table.insert(playerList, p) end
         end
-        if #playerList == 0 then Fluent:Notify({Title = "Нет игроков", Content = "", Duration = 3}); return end
+        if #playerList == 0 then Fluent:Notify({Title = "ℹ️", Content = "Нет игроков", Duration = 3}); return end
         for _, p in ipairs(playerList) do
             local isWL = ESP.Whitelist[p.Name] == true
             espWhitelistSection:AddButton({
-                Title = (isWL and "[+] " or "    ") .. p.Name,
+                Title = (isWL and "✓ " or "  ") .. p.Name,
                 Callback = function()
                     if ESP.Whitelist[p.Name] then ESP.Whitelist[p.Name] = nil
                     else ESP.Whitelist[p.Name] = true end
@@ -1893,19 +1965,19 @@ Tabs.ESP:AddButton({
 -- PERFORMANCE TAB
 -- ============================================================
 Tabs.Performance:AddParagraph({
-    Title = "Performance Tools",
+    Title = "⚡ Performance Tools",
     Content = "Low Detail Mode убирает текстуры, тени и частицы. FPS Unlocker снимает лимит кадров."
 })
 
 local lowDetailSection = Tabs.Performance:AddSection("Low Detail Mode")
 lowDetailSection:AddToggle("LowDetailOn", {
-    Title = "Low Detail Mode",
+    Title = "🔻 Low Detail Mode",
     Description = "Отключает текстуры, decals, частицы, тени, воду, post-processing",
     Default = false
 }):OnChanged(function(v)
     setLowDetail(v)
-    if v then Fluent:Notify({Title = "Low Detail", Content = "Активирован", Duration = 2})
-    else Fluent:Notify({Title = "Low Detail", Content = "Отключён", Duration = 2}) end
+    if v then Fluent:Notify({Title = "🔻 Low Detail", Content = "Активирован", Duration = 2})
+    else Fluent:Notify({Title = "🔺 Low Detail", Content = "Отключён", Duration = 2}) end
 end)
 lowDetailSection:AddToggle("LDRemoveTextures", { Title = "Remove Textures", Default = true }):OnChanged(function(v)
     lowDetailState.RemoveTextures = v
@@ -1933,16 +2005,16 @@ lowDetailSection:AddToggle("LDWater", { Title = "Optimize Water", Default = true
 
 local fpsSection = Tabs.Performance:AddSection("FPS Unlocker")
 fpsSection:AddToggle("FPSUnlock", {
-    Title = "Unlock FPS Cap",
+    Title = "🚀 Unlock FPS Cap",
     Description = "Снимает стандартный лимит 60 FPS через setfpscap()",
     Default = false
 }):OnChanged(function(v)
     if v then
         unlockFps(lowDetailState.FpsCap)
-        Fluent:Notify({Title = "FPS Unlocked", Content = "Cap: " .. lowDetailState.FpsCap, Duration = 3})
+        Fluent:Notify({Title = "🚀 FPS Unlocked", Content = "Cap: " .. lowDetailState.FpsCap, Duration = 3})
     else
         relockFps()
-        Fluent:Notify({Title = "FPS Locked", Content = "Cap: 60", Duration = 2})
+        Fluent:Notify({Title = "🔒 FPS Locked", Content = "Cap: 60", Duration = 2})
     end
 end)
 fpsSection:AddSlider("FpsCapSlider", {
@@ -1953,15 +2025,15 @@ fpsSection:AddSlider("FpsCapSlider", {
     if lowDetailState.FpsUnlocked then setFpsCap(v == 0 and 9999 or v) end
 end)
 fpsSection:AddButton({
-    Title = "Применить FPS Cap",
+    Title = "🔄 Применить FPS Cap",
     Callback = function()
         local cap = lowDetailState.FpsCap == 0 and 9999 or lowDetailState.FpsCap
         setFpsCap(cap)
-        Fluent:Notify({Title = "OK", Content = "FPS Cap = " .. lowDetailState.FpsCap, Duration = 2})
+        Fluent:Notify({Title = "✅", Content = "FPS Cap = " .. lowDetailState.FpsCap, Duration = 2})
     end
 })
 local perfStatusPara = Tabs.Performance:AddParagraph({
-    Title = "Status", Content = "Low Detail: OFF | FPS: 60 (locked)"
+    Title = "📊 Status", Content = "Low Detail: OFF | FPS: 60 (locked)"
 })
 __regConn(RunService.Heartbeat:Connect(function()
     local ld = lowDetailState.Enabled and "ON" or "OFF"
@@ -1979,29 +2051,29 @@ Tabs.Colors:AddSlider("SkinSpd", {Title = "Skin Speed", Default = 5, Min = 1, Ma
 Tabs.Colors:AddSlider("HairSpd", {Title = "Hair Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v) colors.HairSpeed = v / 10 end)
 
 local colorPresets = {
-    {name = "Красный", r = 255, g = 0, b = 0},
-    {name = "Зелёный", r = 0, g = 255, b = 0},
-    {name = "Синий",   r = 0, g = 0, b = 255},
-    {name = "Фиолетовый", r = 128, g = 0, b = 255},
-    {name = "Жёлтый",  r = 255, g = 255, b = 0},
-    {name = "Чёрный",  r = 1, g = 1, b = 1},
-    {name = "Белый",   r = 254, g = 254, b = 254},
-    {name = "Оранжевый", r = 255, g = 128, b = 0},
-    {name = "Розовый", r = 255, g = 105, b = 180},
-    {name = "Cyan",    r = 0, g = 255, b = 255}
+    {name = "🔴 Красный", r = 255, g = 0, b = 0},
+    {name = "🟢 Зелёный", r = 0, g = 255, b = 0},
+    {name = "🔵 Синий",   r = 0, g = 0, b = 255},
+    {name = "🟣 Фиолетовый", r = 128, g = 0, b = 255},
+    {name = "🟡 Жёлтый",  r = 255, g = 255, b = 0},
+    {name = "⚫ Чёрный",  r = 1, g = 1, b = 1},
+    {name = "⚪ Белый",   r = 254, g = 254, b = 254},
+    {name = "🟠 Оранжевый", r = 255, g = 128, b = 0},
+    {name = "💗 Розовый", r = 255, g = 105, b = 180},
+    {name = "🩵 Cyan",    r = 0, g = 255, b = 255}
 }
 for _, preset in ipairs(colorPresets) do
     Tabs.Colors:AddButton({
         Title = preset.name .. " СКИН",
         Callback = function()
             setSkinColor(preset.r, preset.g, preset.b)
-            Fluent:Notify({Title = "Скин", Content = preset.name, Duration = 2})
+            Fluent:Notify({Title = "🎨 Скин", Content = preset.name, Duration = 2})
         end
     })
 end
 Tabs.Colors:AddColorpicker("CustomSkin", {Title = "Кастомный скин", Default = Color3.fromRGB(255, 0, 0)})
 Tabs.Colors:AddButton({
-    Title = "Применить кастомный скин",
+    Title = "✅ Применить кастомный скин",
     Callback = function()
         local c = Options.CustomSkin.Value
         if c then setSkinColor(math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255)) end
@@ -2012,13 +2084,13 @@ for _, preset in ipairs(colorPresets) do
         Title = preset.name .. " ВОЛОСЫ",
         Callback = function()
             setHairColor(preset.r, preset.g, preset.b)
-            Fluent:Notify({Title = "Волосы", Content = preset.name, Duration = 2})
+            Fluent:Notify({Title = "🎨 Волосы", Content = preset.name, Duration = 2})
         end
     })
 end
 Tabs.Colors:AddColorpicker("CustomHair", {Title = "Кастомные волосы", Default = Color3.fromRGB(255, 0, 0)})
 Tabs.Colors:AddButton({
-    Title = "Применить кастомные волосы",
+    Title = "✅ Применить кастомные волосы",
     Callback = function()
         local c = Options.CustomHair.Value
         if c then setHairColor(math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255)) end
@@ -2040,9 +2112,9 @@ Tabs.Visual:AddToggle("NoFog",{Title = "No Fog", Default = false}):OnChanged(fun
 -- ============================================================
 -- SERVER TAB
 -- ============================================================
-local topPingPara = Tabs.Server:AddParagraph({ Title = "Ping / Server Region", Content = "Загрузка..." })
-local topIpPara = Tabs.Server:AddParagraph({ Title = "Server IP / Location (via ip-api)", Content = "Загрузка..." })
-local topRegionPara = Tabs.Server:AddParagraph({ Title = "Server Region (detailed)", Content = "Загрузка..." })
+local topPingPara = Tabs.Server:AddParagraph({ Title = "📶 Ping / 🌍 Server Region", Content = "Загрузка..." })
+local topIpPara = Tabs.Server:AddParagraph({ Title = "🖥️ Server IP / Location (via ip-api)", Content = "Загрузка..." })
+local topRegionPara = Tabs.Server:AddParagraph({ Title = "📍 Server Region (detailed)", Content = "Загрузка..." })
 
 task.spawn(function()
     task.wait(0.5)
@@ -2051,7 +2123,7 @@ task.spawn(function()
     local cLat, cLon, cCode = getClientCoords()
 
     local p = getPlayerPing()
-    local dot = p < 100 and "[+]" or (p < 200 and "[~]" or "[-]")
+    local dot = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
     pcall(function()
         topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, clientCc))
     end)
@@ -2081,18 +2153,20 @@ task.spawn(function()
         pcall(function()
             topIpPara:SetDesc("Не удалось получить IP сервера: " .. tostring(info and info.err or "unknown"))
         end)
-        pcall(function() topRegionPara:SetDesc("Region: неизвестен") end)
+        pcall(function()
+            topRegionPara:SetDesc("Region: неизвестен")
+        end)
     end
 end)
 
-Tabs.Server:AddButton({ Title = "Server Hop", Callback = function() serverHop() end })
-Tabs.Server:AddButton({ Title = "Rejoin Server", Callback = function() rejoinServer() end })
-Tabs.Server:AddButton({ Title = "Force Reconnect", Callback = function() forceReconnect() end })
+Tabs.Server:AddButton({ Title = "🔄 Server Hop", Callback = function() serverHop() end })
+Tabs.Server:AddButton({ Title = "🔁 Rejoin Server", Callback = function() rejoinServer() end })
+Tabs.Server:AddButton({ Title = "⚡ Force Reconnect", Callback = function() forceReconnect() end })
 Tabs.Server:AddButton({
-    Title = "Обновить данные о сервере",
+    Title = "📡 Обновить данные о сервере",
     Description = "Перезапрашивает IP и геолокацию сервера",
     Callback = function()
-        Fluent:Notify({Title = "Обновляю...", Content = "", Duration = 2})
+        Fluent:Notify({Title = "📡", Content = "Обновляю...", Duration = 2})
         task.spawn(function()
             local info = getServerLocation(true)
             if info and info.status == "success" then
@@ -2117,9 +2191,9 @@ Tabs.Server:AddButton({
                         tostring(info.as or "?")
                     ))
                 end)
-                Fluent:Notify({Title = "Данные обновлены", Content = "", Duration = 2})
+                Fluent:Notify({Title = "✅", Content = "Данные обновлены", Duration = 2})
             else
-                Fluent:Notify({Title = "Не удалось: " .. tostring(info and info.err or "?"), Content = "", Duration = 3})
+                Fluent:Notify({Title = "❌", Content = "Не удалось: " .. tostring(info and info.err or "?"), Duration = 3})
             end
         end)
     end
@@ -2127,71 +2201,71 @@ Tabs.Server:AddButton({
 
 local jobSection = Tabs.Server:AddSection("Job ID")
 local jobPara = jobSection:AddParagraph({
-    Title = "Current Job ID",
+    Title = "📋 Current Job ID",
     Content = game.JobId ~= "" and game.JobId or "(нет — приватный / offline)"
 })
 jobSection:AddButton({
-    Title = "Скопировать текущий Job ID",
+    Title = "📋 Скопировать текущий Job ID",
     Description = "Кладёт в буфер ID этого сервера (только публичные)",
     Callback = function()
-        if game.JobId == "" then Fluent:Notify({Title = "Job ID недоступен", Content = "", Duration = 3}); return end
+        if game.JobId == "" then Fluent:Notify({Title = "❌", Content = "Job ID недоступен", Duration = 3}); return end
         local ok = pcall(function()
             if type(setclipboard) == "function" then setclipboard(game.JobId)
             elseif type(toclipboard) == "function" then toclipboard(game.JobId)
             else error("no clipboard") end
         end)
-        if ok then Fluent:Notify({Title = "Скопировано", Content = game.JobId, Duration = 3})
-        else Fluent:Notify({Title = "Буфер недоступен", Content = "", Duration = 3}) end
+        if ok then Fluent:Notify({Title = "📋 Скопировано", Content = game.JobId, Duration = 3})
+        else Fluent:Notify({Title = "❌", Content = "Буфер недоступен", Duration = 3}) end
     end
 })
 jobSection:AddButton({
-    Title = "Обновить Job ID",
+    Title = "🔄 Обновить Job ID",
     Callback = function()
         pcall(function() jobPara:SetDesc(game.JobId ~= "" and game.JobId or "(нет — приватный / offline)") end)
-        Fluent:Notify({Title = "Job ID обновлён", Content = "", Duration = 2})
+        Fluent:Notify({Title = "🔄", Content = "Job ID обновлён", Duration = 2})
     end
 })
 local jobInputBox = jobSection:AddInput("JobIDInput", {
-    Title = "Join by Job ID",
+    Title = "🔌 Join by Job ID",
     Description = "Вставь Job ID публичного сервера (сервер должен быть жив)",
     Placeholder = "e.g. a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
     Default = ""
 })
 jobSection:AddButton({
-    Title = "JOIN по Job ID",
+    Title = "➡️ JOIN по Job ID",
     Callback = function()
         local raw = nil
         pcall(function() raw = jobInputBox.Value end)
         raw = tostring(raw or ""):gsub("%s", "")
-        if raw == "" then Fluent:Notify({Title = "Введи Job ID", Content = "", Duration = 3}); return end
+        if raw == "" then Fluent:Notify({Title = "❌", Content = "Введи Job ID", Duration = 3}); return end
         if not raw:match("^%x+$") or #raw < 8 then
-            Fluent:Notify({Title = "Некорректный Job ID", Content = "", Duration = 3}); return
+            Fluent:Notify({Title = "❌", Content = "Некорректный Job ID", Duration = 3}); return
         end
         teleportToJob(raw, "JOIN")
     end
 })
 jobSection:AddButton({
-    Title = "Вставить из буфера",
+    Title = "📥 Вставить из буфера",
     Callback = function()
         local clip = nil
         pcall(function() if type(getclipboard) == "function" then clip = getclipboard() end end)
         clip = tostring(clip or ""):gsub("%s", "")
-        if clip == "" then Fluent:Notify({Title = "Буфер пуст", Content = "", Duration = 3}); return end
+        if clip == "" then Fluent:Notify({Title = "❌", Content = "Буфер пуст", Duration = 3}); return end
         pcall(function() jobInputBox:SetValue(clip) end)
-        Fluent:Notify({Title = "Вставлено: " .. clip:sub(1, 12) .. "...", Content = "", Duration = 2})
+        Fluent:Notify({Title = "📥", Content = "Вставлено: " .. clip:sub(1, 12) .. "...", Duration = 2})
     end
 })
 jobSection:AddButton({
-    Title = "Join Last Server",
+    Title = "⏪ Join Last Server",
     Description = "Вернуться на предыдущий сервер одним кликом",
     Callback = function()
         local list = loadHistory()
-        if #list == 0 then Fluent:Notify({Title = "История пуста", Content = "", Duration = 3}); return end
+        if #list == 0 then Fluent:Notify({Title = "❌", Content = "История пуста", Duration = 3}); return end
         local target = nil
         for _, entry in ipairs(list) do
             if entry.id and entry.id ~= game.JobId then target = entry; break end
         end
-        if not target then Fluent:Notify({Title = "Нет других серверов в истории", Content = "", Duration = 3}); return end
+        if not target then Fluent:Notify({Title = "ℹ️", Content = "Нет других серверов в истории", Duration = 3}); return end
         teleportToJob(target.id, "LAST SERVER")
     end
 })
@@ -2205,7 +2279,7 @@ local function buildHistoryValues()
     if #list == 0 then values[#values + 1] = "(пусто)"; return values end
     for i, e in ipairs(list) do
         local id = e.id or "?"
-        local disp = string.format("%s  |  %s", fmtTime(e.time), id:sub(1, 12))
+        local disp = string.format("🕐 %s  |  %s", fmtTime(e.time), id:sub(1, 12))
         if historyDisplayMap[disp] then disp = disp .. " (" .. i .. ")" end
         values[#values + 1] = disp
         historyDisplayMap[disp] = id
@@ -2214,7 +2288,7 @@ local function buildHistoryValues()
 end
 local initialValues = buildHistoryValues()
 historyDropdown = jobSection:AddDropdown("JobHistory", {
-    Title = "Последние Job ID",
+    Title = "📚 Последние Job ID",
     Description = "Выбери запись — подключение произойдёт автоматически",
     Values = initialValues,
     Default = initialValues[1] or "(пусто)",
@@ -2222,30 +2296,30 @@ historyDropdown = jobSection:AddDropdown("JobHistory", {
     Callback = function(selected)
         local id = historyDisplayMap[selected]
         if not id or id == "" then return end
-        if id == game.JobId then Fluent:Notify({Title = "Это текущий сервер", Content = "", Duration = 3}); return end
+        if id == game.JobId then Fluent:Notify({Title = "ℹ️", Content = "Это текущий сервер", Duration = 3}); return end
         teleportToJob(id, "HISTORY")
     end
 })
 jobSection:AddButton({
-    Title = "Обновить список истории",
+    Title = "♻️ Обновить список истории",
     Callback = function()
         pcall(function() historyDropdown:SetValues(buildHistoryValues()) end)
-        Fluent:Notify({Title = "История обновлена", Content = "", Duration = 2})
+        Fluent:Notify({Title = "♻️", Content = "История обновлена", Duration = 2})
     end
 })
 jobSection:AddButton({
-    Title = "Очистить историю",
+    Title = "🗑️ Очистить историю",
     Callback = function()
-        if not hasFs() then Fluent:Notify({Title = "Executor не поддерживает файлы", Content = "", Duration = 3}); return end
+        if not hasFs() then Fluent:Notify({Title = "❌", Content = "Executor не поддерживает файлы", Duration = 3}); return end
         pcall(function() if isfile(HISTORY_FILE) then delfile(HISTORY_FILE) end end)
         pcall(function() historyDropdown:SetValues({"(пусто)"}) end)
         historyDisplayMap = {}
-        Fluent:Notify({Title = "История очищена", Content = "", Duration = 2})
+        Fluent:Notify({Title = "🗑️", Content = "История очищена", Duration = 2})
     end
 })
 
 -- ============================================================
--- ФОНОВЫЕ ЦИКЛЫ
+-- BACKGROUND LOOPS
 -- ============================================================
 getgenv().Flumium_LoopsRunning = true
 
@@ -2253,7 +2327,7 @@ task.spawn(function()
     while getgenv().Flumium_LoopsRunning and __isCurrentSession() do
         task.wait(1.5)
         local p = getPlayerPing()
-        local dot = p < 100 and "[+]" or (p < 200 and "[~]" or "[-]")
+        local dot = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
         local cc = getClientCountry()
         pcall(function() topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, cc)) end)
     end
@@ -2292,7 +2366,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
--- ГЛАВНЫЙ ЦИКЛ (БЕЗ ESP КЕЙБИНДА)
+-- MAIN LOOP
 -- ============================================================
 __regConn(UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
@@ -2300,7 +2374,7 @@ __regConn(UserInputService.InputBegan:Connect(function(input, gp)
         if input.UserInputType == Enum.UserInputType.Keyboard then
             markerClick.ModifierKey = input.KeyCode
             markerClick.ListeningForBind = false
-            pcall(function() markerBindBtn:SetTitle("Modifier: " .. input.KeyCode.Name) end)
+            pcall(function() markerBindBtn:SetTitle("🎹 Modifier: " .. input.KeyCode.Name) end)
         end
         return
     end
@@ -2308,7 +2382,7 @@ __regConn(UserInputService.InputBegan:Connect(function(input, gp)
         if input.UserInputType == Enum.UserInputType.Keyboard then
             silentAim.HoldKey = input.KeyCode
             silentAim.ListeningForBind = false
-            pcall(function() silentBindButton:SetTitle("BIND: " .. input.KeyCode.Name) end)
+            pcall(function() silentBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end)
         end
         return
     end
@@ -2316,7 +2390,7 @@ __regConn(UserInputService.InputBegan:Connect(function(input, gp)
         if input.UserInputType == Enum.UserInputType.Keyboard then
             settings.aimKey = input.KeyCode
             settings.ListeningForAimBind = false
-            pcall(function() aimBindButton:SetTitle("BIND: " .. input.KeyCode.Name) end)
+            pcall(function() aimBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end)
         end
         return
     end
@@ -2324,7 +2398,7 @@ __regConn(UserInputService.InputBegan:Connect(function(input, gp)
         if input.UserInputType == Enum.UserInputType.Keyboard then
             settings.aim2Key = input.KeyCode
             settings.aim2ListeningForBind = false
-            pcall(function() aim2BindButton:SetTitle("BIND: " .. input.KeyCode.Name) end)
+            pcall(function() aim2BindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end)
         end
         return
     end
@@ -2453,15 +2527,23 @@ pcall(function()
 end)
 
 -- ============================================================
--- UNLOAD-ХУКИ
+-- UNLOAD HOOKS
 -- ============================================================
-__regFn(function() getgenv().Flumium_LoopsRunning = false end)
+__regFn(function()
+    getgenv().Flumium_LoopsRunning = false
+end)
 
 __regFn(function()
-    aimbotEnabled = false; aiming = false; currentTarget = nil
-    aim2Enabled = false; aim2ing = false; aim2Target = nil
-    silentAim.MasterEnabled = false; silentAim.Enabled = false
-    silentAim.CachedTarget = nil; silentAim.CachedCFrame = nil
+    aimbotEnabled = false
+    aiming = false
+    currentTarget = nil
+    aim2Enabled = false
+    aim2ing = false
+    aim2Target = nil
+    silentAim.MasterEnabled = false
+    silentAim.Enabled = false
+    silentAim.CachedTarget = nil
+    silentAim.CachedCFrame = nil
     markerClick.Enabled = false
 end)
 
@@ -2478,14 +2560,18 @@ __regFn(function()
 end)
 
 __regFn(function()
-    ESP.Enabled = false; ESP.Visible = false
+    ESP.Enabled = false
+    ESP.Visible = false
     for p in pairs(espData) do clearPlayer(p) end
 end)
 
-__regFn(function() fastDeactivateLowDetail() end)
+__regFn(function()
+    fastDeactivateLowDetail()
+end)
 
 __regFn(function()
-    colors.RainbowSkin = false; colors.RainbowHair = false
+    colors.RainbowSkin = false
+    colors.RainbowHair = false
 end)
 
 __regFn(function()
@@ -2510,9 +2596,11 @@ __regFn(function()
 end)
 
 print("====================================")
-print("Flumium Client v1.4 загружен!")
-print("ESP: привязка к Head, StudsOffset 2.5 (без кейбинда)")
-print("Aimbot 1: \\ (BackSlash) | Aimbot 2: [1]")
-print("Silent Aim: \\ (BackSlash) | Marker: ` (Backquote)")
-print("RightControl - скрыть меню")
+print("✅ Flumium Client v1.4 загружен!")
+print("📍 Region detection: IP → ip-api (Method 1)")
+print("🚫 Random Server удалён")
+print("🔁 Один клик = одна попытка телепорта")
+print("🎯 Aimbot 2: клавиша [1], целится ВЫШЕ ГОЛОВЫ")
+print("👁️ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД (кейбинд убран)")
+print("📌 RightControl - скрыть меню")
 print("====================================")
