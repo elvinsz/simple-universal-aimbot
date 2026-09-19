@@ -1,11 +1,12 @@
 --[[
-    Flumium Client v1.1
-    ✅ FIX: autoexec больше не ломается после rejoin (JobId-aware cleanup)
-    ✅ FIX: Fluent кэшируется локально — не виснет если github блокируется
-    ✅ FIX: диагностика в консоль — видно где падает
+    Flumium Client v1.2
+    ✅ FIX: убраны авторетраи телепорта (больше не «хопает» несколько раз)
+    ✅ FIX: отвязан глобальный TeleportInitFailed — не накапливается
+    ✅ FIX: ping/region loops останавливаются через флаг (а не Disconnect на потоке)
+    ✅ FIX: session token — старый экземпляр не «доигрывает» после rejoin
     ✅ Aimbot 2 (клавиша [1]), Silent Aim, Kunai Marker
     ✅ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД
-    ✅ Server: Job ID + история + Join Last + Random + Region
+    ✅ Server: Job ID + история 10 + Join Last + Random + Region
     ✅ Pink Theme, Low Detail Mode, FPS Unlocker
 ]]
 
@@ -14,6 +15,25 @@
 -- ============================================================
 local function __dbg(msg) print("[Flumium] " .. tostring(msg)) end
 __dbg("start | PlaceId=" .. tostring(game.PlaceId) .. " | JobId=" .. tostring(game.JobId))
+
+-- ============================================================
+-- SESSION TOKEN + INIT GUARD
+-- ============================================================
+local __SESSION = tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
+getgenv().Flumium_SessionToken = __SESSION
+__dbg("session = " .. __SESSION)
+
+local function __isCurrentSession()
+    return getgenv().Flumium_SessionToken == __SESSION
+end
+
+local __lastInit = getgenv().Flumium_LastInitTime or 0
+local __now = os.clock()
+if __now - __lastInit < 1.5 then
+    warn("[Flumium] двойной запуск за <1.5с — пропускаем (init guard)")
+    return
+end
+getgenv().Flumium_LastInitTime = __now
 
 -- ============================================================
 -- UNLOAD PREVIOUS INSTANCE (JobId-aware)
@@ -25,7 +45,7 @@ local __sameServer = (__prevJobId ~= nil
                     and __currJobId ~= "")
 
 if __sameServer then
-    __dbg("same server detected — unloading previous instance")
+    __dbg("same server — unloading previous instance")
     if type(getgenv().Flumium_Unload) == "function" then
         pcall(getgenv().Flumium_Unload)
         __dbg("previous cleanup OK")
@@ -33,6 +53,15 @@ if __sameServer then
 else
     __dbg("new server / first run — skipping cleanup")
 end
+
+-- Отвязываем старый TeleportInitFailed если был
+if getgenv().Flumium_TeleportFailedConn then
+    pcall(function() getgenv().Flumium_TeleportFailedConn:Disconnect() end)
+    getgenv().Flumium_TeleportFailedConn = nil
+end
+
+-- Останавливаем старые ping/region loops
+getgenv().Flumium_LoopsRunning = false
 
 getgenv().Flumium_Unload = nil
 getgenv().Flumium_LastJobId = __currJobId
@@ -93,7 +122,7 @@ end
 getgenv().Flumium_Unload = __runCleanup
 
 -- ============================================================
--- LOAD UI LIBRARY (с локальным кэшем)
+-- LOAD UI LIBRARY
 -- ============================================================
 local FLUENT_URL    = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
 local FLUENT_CACHE  = "Flumium_Fluent.lua"
@@ -108,13 +137,13 @@ if type(readfile) == "function" and type(isfile) == "function" then
         local ok2, content = pcall(readfile, FLUENT_CACHE)
         if ok2 and type(content) == "string" and #content > 1000 then
             FluentSource = content
-            __dbg("Fluent loaded from local cache (" .. #content .. " bytes)")
+            __dbg("Fluent from cache (" .. #content .. " bytes)")
         end
     end
 end
 
 if not FluentSource then
-    __dbg("downloading Fluent from github...")
+    __dbg("downloading Fluent...")
     local ok, result = pcall(function()
         return game:HttpGet(FLUENT_URL, true)
     end)
@@ -123,7 +152,6 @@ if not FluentSource then
         __dbg("Fluent downloaded (" .. #result .. " bytes)")
         if type(writefile) == "function" then
             pcall(function() writefile(FLUENT_CACHE, result) end)
-            __dbg("Fluent cached to " .. FLUENT_CACHE)
         end
     else
         __dbg("Fluent download FAILED: " .. tostring(result))
@@ -131,9 +159,8 @@ if not FluentSource then
 end
 
 if not FluentSource then
-    warn("[Flumium] ❌ Не удалось загрузить Fluent.")
-    warn("[Flumium]     Проверь доступ к github.com / HTTP / интернет.")
-    warn("[Flumium]     Можно скачать main.lua вручную и положить как " .. FLUENT_CACHE)
+    warn("[Flumium] ❌ Не удалось загрузить Fluent. Проверь доступ к github.com.")
+    warn("[Flumium]     Можно скачать main.lua вручную → " .. FLUENT_CACHE)
     return
 end
 
@@ -145,7 +172,7 @@ end
 
 local Fluent = FluentFn()
 if type(Fluent) ~= "table" then
-    warn("[Flumium] ❌ Fluent() вернул " .. type(Fluent) .. ", ожидалась таблица.")
+    warn("[Flumium] ❌ Fluent() вернул " .. type(Fluent))
     return
 end
 
@@ -168,8 +195,8 @@ pcall(function()
     end
 end)
 
-if not SaveManager then __dbg("SaveManager — не загружен (не критично)") end
-if not InterfaceManager then __dbg("InterfaceManager — не загружен (не критично)") end
+if not SaveManager then __dbg("SaveManager — не загружен") end
+if not InterfaceManager then __dbg("InterfaceManager — не загружен") end
 
 -- ============================================================
 -- SERVICES
@@ -253,6 +280,11 @@ local aim2Enabled, aim2ing, aim2Target = false, false, nil
 local lastTargetUpdate, lastTarget2Update = 0, 0
 local hue, lightingHue = 0, 0
 local rainbowSpeed = 0.005
+
+-- Флаги занятости
+local __serverHopBusy = false
+local __randomBusy = false
+local __teleportBusy = false
 
 local ALL_BODY_PARTS = {
     "Head", "HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso",
@@ -1158,28 +1190,105 @@ local function aimAtTarget2(p)
 end
 
 --> [< SERVER FUNCTIONS >] <--
-local function serverHop()
-    Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск...", Duration = 3})
-    pcall(function()
-        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
-        local servers = HttpService:JSONDecode(game:HttpGet(url))
-        local avail = {}
-        for _, s in ipairs(servers.data) do
-            if s.playing < s.maxPlayers and s.id ~= game.JobId then table.insert(avail, s.id) end
+
+-- ✅ Одна попытка телепорта, без авторетраев
+local function teleportToJob(targetId, labelText)
+    if __teleportBusy then
+        Fluent:Notify({Title = "⏳", Content = "Телепорт уже в процессе...", Duration = 2})
+        return
+    end
+    if not targetId or targetId == "" then
+        Fluent:Notify({Title = "❌", Content = "Пустой Job ID", Duration = 3})
+        return
+    end
+    if targetId == game.JobId then
+        Fluent:Notify({Title = "ℹ️", Content = "Ты уже на этом сервере", Duration = 3})
+        return
+    end
+
+    __teleportBusy = true
+    pushHistory(game.JobId)
+
+    Fluent:Notify({
+        Title = "➡️ " .. (labelText or "JOIN"),
+        Content = targetId:sub(1, 8) .. "...",
+        Duration = 2
+    })
+
+    task.spawn(function()
+        local ok = pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetId, LocalPlayer)
+        end)
+        if not ok then
+            pcall(function()
+                local opts = Instance.new("TeleportOptions")
+                opts.ServerInstanceId = targetId
+                TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, opts)
+            end)
         end
-        if #avail > 0 then
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, avail[math.random(1, #avail)], LocalPlayer)
-        else
-            Fluent:Notify({Title = "❌", Content = "Нет других серверов", Duration = 3})
+        task.wait(3)
+        __teleportBusy = false
+    end)
+end
+
+local function serverHop()
+    if __serverHopBusy then
+        Fluent:Notify({Title = "⏳", Content = "Уже ищу сервер...", Duration = 2})
+        return
+    end
+    __serverHopBusy = true
+
+    Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск сервера...", Duration = 2})
+    task.spawn(function()
+        local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+        local ok, response = pcall(function() return game:HttpGet(url, true) end)
+        if not ok or type(response) ~= "string" then
+            Fluent:Notify({Title = "❌", Content = "Не удалось получить список серверов", Duration = 4})
+            __serverHopBusy = false
+            return
+        end
+        local ok2, data = pcall(function() return HttpService:JSONDecode(response) end)
+        if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then
+            Fluent:Notify({Title = "❌", Content = "Ошибка парсинга", Duration = 4})
+            __serverHopBusy = false
+            return
+        end
+
+        local avail = {}
+        for _, s in ipairs(data.data) do
+            if s.playing < s.maxPlayers and s.id ~= game.JobId then
+                table.insert(avail, s.id)
+            end
+        end
+
+        if #avail == 0 then
+            Fluent:Notify({Title = "❌", Content = "Нет доступных серверов", Duration = 4})
+            __serverHopBusy = false
+            return
+        end
+
+        local targetId = avail[math.random(1, #avail)]
+        teleportToJob(targetId, "Server Hop")
+        task.wait(3)
+        __serverHopBusy = false
+    end)
+end
+
+local function rejoinServer()
+    Fluent:Notify({Title = "🔁 Rejoin", Content = "Переподключение...", Duration = 2})
+    pushHistory(game.JobId)
+    task.spawn(function()
+        local ok = pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+        end)
+        if not ok then
+            pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
         end
     end)
 end
-local function rejoinServer()
-    Fluent:Notify({Title = "🔁 Rejoin", Content = "Переподключение...", Duration = 3})
-    pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
-end
+
 local function forceReconnect()
-    Fluent:Notify({Title = "⚡ Force Reconnect", Content = "Принудительное...", Duration = 3})
+    Fluent:Notify({Title = "⚡ Force Reconnect", Content = "Принудительное...", Duration = 2})
     task.spawn(function()
         for i = 1, 3 do
             local ok = pcall(function()
@@ -1194,7 +1303,7 @@ end
 
 --> [< GUI >] <--
 local Window = Fluent:CreateWindow({
-    Title = "Flumium Client v1.1",
+    Title = "Flumium Client v1.2",
     SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 520),
@@ -1643,39 +1752,10 @@ local function fmtTime(t)
     if not ok or not d then return "--:--" end
     return string.format("%02d:%02d", d.hour, d.min)
 end
-local function teleportToJob(targetId, labelText)
-    if not targetId or targetId == "" then
-        Fluent:Notify({Title = "❌", Content = "Пустой Job ID", Duration = 3}); return
-    end
-    if targetId == game.JobId then
-        Fluent:Notify({Title = "ℹ️", Content = "Ты уже на этом сервере", Duration = 3}); return
-    end
-    pushHistory(game.JobId)
-    Fluent:Notify({ Title = "➡️ JOIN",
-        Content = (labelText or "Подключаюсь") .. " → " .. targetId:sub(1, 8) .. "...",
-        Duration = 3 })
-    task.spawn(function()
-        local ok, err = pcall(function()
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, targetId, LocalPlayer)
-        end)
-        if not ok then
-            local ok2 = pcall(function()
-                local opts = Instance.new("TeleportOptions")
-                opts.ServerInstanceId = targetId
-                TeleportService:TeleportAsync(game.PlaceId, {LocalPlayer}, opts)
-            end)
-            if not ok2 then
-                Fluent:Notify({ Title = "❌ JOIN failed",
-                    Content = "Сервер мёртв / приватный / полный. " .. tostring(err):sub(1, 45),
-                    Duration = 5 })
-            end
-        end
-    end)
-end
 
-Tabs.Server:AddButton({ Title = "🔄 Server Hop", Callback = function() pushHistory(game.JobId); serverHop() end })
-Tabs.Server:AddButton({ Title = "🔁 Rejoin Server", Callback = function() pushHistory(game.JobId); rejoinServer() end })
-Tabs.Server:AddButton({ Title = "⚡ Force Reconnect", Callback = function() pushHistory(game.JobId); forceReconnect() end })
+Tabs.Server:AddButton({ Title = "🔄 Server Hop", Callback = function() serverHop() end })
+Tabs.Server:AddButton({ Title = "🔁 Rejoin Server", Callback = function() rejoinServer() end })
+Tabs.Server:AddButton({ Title = "⚡ Force Reconnect", Callback = function() forceReconnect() end })
 
 local jobSection = Tabs.Server:AddSection("Job ID")
 local jobPara = jobSection:AddParagraph({
@@ -1869,29 +1949,51 @@ randomSection:AddButton({
     Title = "🎲 Random Server",
     Description = "Найти живой сервер по заданным фильтрам",
     Callback = function()
+        if __randomBusy then
+            Fluent:Notify({Title = "⏳", Content = "Уже ищу...", Duration = 2})
+            return
+        end
+        __randomBusy = true
         Fluent:Notify({Title = "🎲 Поиск", Content = "Опрашиваю список серверов...", Duration = 2})
         task.spawn(function()
             local pick, err = pickRandomServer()
-            if not pick then Fluent:Notify({Title = "❌", Content = err or "Не найдено", Duration = 4}); return end
-            Fluent:Notify({ Title = "🎲 Найден",
-                Content = string.format("%s... | ping %d | %d/%d", pick.id:sub(1, 8), pick.ping, pick.playing, pick.maxPlayers),
-                Duration = 3 })
+            if not pick then
+                Fluent:Notify({Title = "❌", Content = err or "Не найдено", Duration = 4})
+                __randomBusy = false
+                return
+            end
+            Fluent:Notify({
+                Title = "🎲 Найден",
+                Content = string.format("%s... | ping %d | %d/%d",
+                    pick.id:sub(1, 8), pick.ping, pick.playing, pick.maxPlayers),
+                Duration = 3
+            })
             teleportToJob(pick.id, "RANDOM")
+            task.wait(3)
+            __randomBusy = false
         end)
     end
 })
 
-__regConn(task.spawn(function()
-    while task.wait(1.5) do
+-- ============================================================
+-- ФОНОВЫЕ ЦИКЛЫ (останавливаются по флагу, а не через Disconnect)
+-- ============================================================
+getgenv().Flumium_LoopsRunning = true
+
+task.spawn(function()
+    while getgenv().Flumium_LoopsRunning and __isCurrentSession() do
+        task.wait(1.5)
         local p = getPlayerPing()
         local dot = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
         local cc = getClientCountry()
         pcall(function() topPingPara:SetDesc(string.format("%s %d ms  |  You: %s", dot, p, cc)) end)
     end
-end))
-__regConn(task.spawn(function()
+end)
+
+task.spawn(function()
     task.wait(2)
-    while task.wait(30) do
+    while getgenv().Flumium_LoopsRunning and __isCurrentSession() do
+        task.wait(30)
         __serverLocCache = nil
         local info = getServerLocation(true)
         if info and info.status == "success" then
@@ -1909,7 +2011,7 @@ __regConn(task.spawn(function()
             end)
         end
     end
-end))
+end)
 
 --> [< ГЛАВНЫЙ ЦИКЛ >] <--
 __regConn(UserInputService.InputBegan:Connect(function(input, gp)
@@ -2066,6 +2168,11 @@ end)
 -- UNLOAD-ХУКИ
 -- ============================================================
 __regFn(function()
+    -- Останавливаем фоновые циклы
+    getgenv().Flumium_LoopsRunning = false
+end)
+
+__regFn(function()
     aimbotEnabled = false
     aiming = false
     currentTarget = nil
@@ -2082,6 +2189,13 @@ end)
 __regFn(function()
     if type(disableSilentHook) == "function" then pcall(disableSilentHook) end
     if type(disableKunaiHook)  == "function" then pcall(disableKunaiHook)  end
+end)
+
+__regFn(function()
+    if getgenv().Flumium_TeleportFailedConn then
+        pcall(function() getgenv().Flumium_TeleportFailedConn:Disconnect() end)
+        getgenv().Flumium_TeleportFailedConn = nil
+    end
 end)
 
 __regFn(function()
@@ -2121,10 +2235,10 @@ __regFn(function()
 end)
 
 print("====================================")
-print("✅ Flumium Client v1.1 загружен!")
-print("🔁 Повторный execute → старый экземпляр выгружается автоматически")
+print("✅ Flumium Client v1.2 загружен!")
+print("🔁 Один клик на кнопку = одна попытка телепорта")
 print("🌐 Rejoin → cleanup пропускается (JobId-aware)")
-print("💾 Fluent кэшируется локально → работает даже без github")
+print("💾 Fluent кэшируется локально")
 print("🎯 Aimbot 2: клавиша [1], целится ВЫШЕ ГОЛОВЫ")
 print("👁️ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД")
 print("📌 RightControl - скрыть меню")
