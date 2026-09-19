@@ -4,194 +4,8 @@
     ✅ Добавлены новые функции из Flumium Client v1.4
     ✅ Aimbot 2 (клавиша [1]), Performance, Server Tools
     ✅ Убран кейбинд с ESP
-    ✅ Название в меню: Flumium Client v1.4 2 Aimbots • ESP • Server Tools • Performance
+    ✅ Название в меню: Flumium Client v1.4
 ]]
-
--- ============================================================
--- DIAGNOSTICS
--- ============================================================
-local function __dbg(msg) print("[Flumium] " .. tostring(msg)) end
-__dbg("start | PlaceId=" .. tostring(game.PlaceId) .. " | JobId=" .. tostring(game.JobId))
-
--- ============================================================
--- SESSION TOKEN + INIT GUARD
--- ============================================================
-local __SESSION = tostring(os.time()) .. "_" .. tostring(math.random(100000, 999999))
-getgenv().Flumium_SessionToken = __SESSION
-__dbg("session = " .. __SESSION)
-
-local function __isCurrentSession()
-    return getgenv().Flumium_SessionToken == __SESSION
-end
-
-local __lastInit = getgenv().Flumium_LastInitTime or 0
-local __now = os.clock()
-if __now - __lastInit < 1.5 then
-    warn("[Flumium] двойной запуск за <1.5с — пропускаем (init guard)")
-    return
-end
-getgenv().Flumium_LastInitTime = __now
-
--- ============================================================
--- UNLOAD PREVIOUS INSTANCE (JobId-aware)
--- ============================================================
-local __prevJobId = getgenv().Flumium_LastJobId
-local __currJobId = game.JobId
-local __sameServer = (__prevJobId ~= nil
-                    and __prevJobId == __currJobId
-                    and __currJobId ~= "")
-
-if __sameServer then
-    __dbg("same server — unloading previous instance")
-    if type(getgenv().Flumium_Unload) == "function" then
-        pcall(getgenv().Flumium_Unload)
-        __dbg("previous cleanup OK")
-    end
-else
-    __dbg("new server / first run — skipping cleanup")
-end
-
-if getgenv().Flumium_TeleportFailedConn then
-    pcall(function() getgenv().Flumium_TeleportFailedConn:Disconnect() end)
-    getgenv().Flumium_TeleportFailedConn = nil
-end
-
-getgenv().Flumium_LoopsRunning = false
-
-getgenv().Flumium_Unload = nil
-getgenv().Flumium_LastJobId = __currJobId
-getgenv().Fluent = nil
-getgenv().SaveManager = nil
-getgenv().InterfaceManager = nil
-if _G then
-    _G.Fluent = nil
-    _G.SaveManager = nil
-    _G.InterfaceManager = nil
-end
-
-if __sameServer then
-    pcall(function()
-        local CoreGui = game:GetService("CoreGui")
-        local Players = game:GetService("Players")
-        local pg = Players.LocalPlayer and Players.LocalPlayer:FindFirstChild("PlayerGui")
-        for _, parent in ipairs({CoreGui, pg}) do
-            if parent then
-                for _, name in ipairs({"Fluent", "FluentUI", "FluentGui", "Flumium"}) do
-                    local obj = parent:FindFirstChild(name)
-                    if obj then obj:Destroy() end
-                end
-            end
-        end
-    end)
-
-    for _, key in ipairs({"Flumium_Drawing_Fov1", "Flumium_Drawing_Fov2", "Flumium_Drawing_FovS"}) do
-        local d = getgenv()[key]
-        if d then pcall(function() d:Remove() end) end
-        getgenv()[key] = nil
-    end
-
-    pcall(function()
-        if type(setfpscap) == "function" then setfpscap(60) end
-    end)
-end
-
--- ============================================================
--- SAFE RE-EXECUTE TRACKER
--- ============================================================
-local __CLEANUP = { conns = {}, hooks = {}, insts = {}, fns = {}, done = false }
-local function __regConn(c)  table.insert(__CLEANUP.conns, c);  return c end
-local function __regHook(fn) table.insert(__CLEANUP.hooks, fn) end
-local function __regInst(i)  table.insert(__CLEANUP.insts, i);  return i end
-local function __regFn(fn)   table.insert(__CLEANUP.fns, fn)   end
-
-local function __runCleanup()
-    if __CLEANUP.done then return end
-    __CLEANUP.done = true
-    for _, c in ipairs(__CLEANUP.conns) do pcall(function() c:Disconnect() end) end
-    for _, fn in ipairs(__CLEANUP.fns) do pcall(fn) end
-    for _, fn in ipairs(__CLEANUP.hooks) do pcall(fn) end
-    for _, i in ipairs(__CLEANUP.insts) do pcall(function() i:Destroy() end) end
-    __CLEANUP.conns, __CLEANUP.fns, __CLEANUP.hooks, __CLEANUP.insts = {}, {}, {}, {}
-end
-
-getgenv().Flumium_Unload = __runCleanup
-
--- ============================================================
--- LOAD UI LIBRARY
--- ============================================================
-local FLUENT_URL    = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
-local FLUENT_CACHE  = "Flumium_Fluent.lua"
-local SAVEMGR_URL   = "https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"
-local IFACEMGR_URL  = "https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"
-
-local FluentSource = nil
-
-if type(readfile) == "function" and type(isfile) == "function" then
-    local ok, exists = pcall(isfile, FLUENT_CACHE)
-    if ok and exists then
-        local ok2, content = pcall(readfile, FLUENT_CACHE)
-        if ok2 and type(content) == "string" and #content > 1000 then
-            FluentSource = content
-            __dbg("Fluent from cache (" .. #content .. " bytes)")
-        end
-    end
-end
-
-if not FluentSource then
-    __dbg("downloading Fluent...")
-    local ok, result = pcall(function()
-        return game:HttpGet(FLUENT_URL, true)
-    end)
-    if ok and type(result) == "string" and #result > 1000 then
-        FluentSource = result
-        __dbg("Fluent downloaded (" .. #result .. " bytes)")
-        if type(writefile) == "function" then
-            pcall(function() writefile(FLUENT_CACHE, result) end)
-        end
-    else
-        __dbg("Fluent download FAILED: " .. tostring(result))
-    end
-end
-
-if not FluentSource then
-    warn("[Flumium] ❌ Не удалось загрузить Fluent. Проверь доступ к github.com.")
-    warn("[Flumium]     Можно скачать main.lua вручную → " .. FLUENT_CACHE)
-    return
-end
-
-local FluentFn, compileErr = loadstring(FluentSource)
-if type(FluentFn) ~= "function" then
-    warn("[Flumium] ❌ Fluent compile error: " .. tostring(compileErr))
-    return
-end
-
-local Fluent = FluentFn()
-if type(Fluent) ~= "table" then
-    warn("[Flumium] ❌ Fluent() вернул " .. type(Fluent))
-    return
-end
-
-__dbg("Fluent OK")
-
-local SaveManager = nil
-local InterfaceManager = nil
-
-pcall(function()
-    local src = game:HttpGet(SAVEMGR_URL, true)
-    if type(src) == "string" and #src > 100 then
-        SaveManager = loadstring(src)()
-    end
-end)
-
-pcall(function()
-    local src = game:HttpGet(IFACEMGR_URL, true)
-    if type(src) == "string" and #src > 100 then
-        InterfaceManager = loadstring(src)()
-    end
-end)
-
-if not SaveManager then __dbg("SaveManager — не загружен") end
-if not InterfaceManager then __dbg("InterfaceManager — не загружен") end
 
 -- ============================================================
 -- SERVICES
@@ -211,6 +25,105 @@ local Mouse = LocalPlayer:GetMouse()
 
 local shindoEvent
 pcall(function() shindoEvent = LocalPlayer:WaitForChild("startevent", 8) end)
+
+-- ============================================================
+-- LOAD UI LIBRARY
+-- ============================================================
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+if not Fluent then return end
+
+-- ============================================================
+-- SETTINGS
+-- ============================================================
+local settings = {
+    fov = 300, smoothing = 0.15, prediction = 0.065,
+    wallCheck = false, teamCheck = false, aimPart = "Auto", aimMode = "Hold",
+    aimKey = Enum.KeyCode.BackSlash, ListeningForAimBind = false,
+    showFovCircle = true, maxDistance = 0, prioritizeClose = true, mode360 = false,
+    fovColor = Color3.fromRGB(255, 0, 0), targetedColor = Color3.fromRGB(0, 255, 0),
+    rainbowFov = false,
+
+    aim2Fov = 300, aim2Smoothing = 0.15, aim2Prediction = 0.065,
+    aim2WallCheck = false, aim2TeamCheck = false, aim2Mode = "Hold",
+    aim2Key = Enum.KeyCode.One, aim2ListeningForBind = false,
+    aim2ShowFovCircle = true, aim2MaxDistance = 0, aim2PrioritizeClose = true,
+    aim2Mode360 = false, aim2HeightOffset = 3,
+    aim2FovColor = Color3.fromRGB(255, 165, 0), aim2TargetedColor = Color3.fromRGB(255, 255, 0),
+    aim2RainbowFov = false,
+
+    xray = false, fullBright = false, nightVision = false,
+    noShadows = false, noBloom = false, noSunRays = false,
+    rainbowLighting = false, noFog = false
+}
+
+local silentAim = {
+    Enabled = false, MasterEnabled = false, Mode = "Hold",
+    HoldKey = Enum.KeyCode.BackSlash, ListeningForBind = false,
+    Prediction = 0.187, FOV = 500, TargetPart = "HumanoidRootPart",
+    ShowFovCircle = true, MaxDistance = 0, PrioritizeClose = true, Mode360 = false,
+    FovColor = Color3.fromRGB(100, 200, 255), CachedTarget = nil, CachedCFrame = nil,
+    Logging = false
+}
+
+local markerClick = {
+    Enabled = false, ModifierKey = Enum.KeyCode.Backquote,
+    ListeningForBind = false, Debug = false, HeightOffset = 3
+}
+
+local ESP = {
+    Enabled = false, Visible = false, Range = math.huge, UpdateRate = 1,
+    Font = Enum.Font.GothamBlack, Size = 0.70, Width = 1.60, Height = 1.10,
+    ShowName = true, ShowHPBar = true, ShowMeter = true, ShowMD = true,
+    ShowHPText = true, ShowDodge = true, Whitelist = {},
+}
+
+local colors = { RainbowSkin = false, RainbowHair = false, SkinSpeed = 0.5, HairSpeed = 0.5, Invert = true }
+local skinTimer, hairTimer = 0, 0
+
+local originalLighting = {
+    Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient,
+    Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime,
+    FogEnd = Lighting.FogEnd, FogStart = Lighting.FogStart,
+    GlobalShadows = Lighting.GlobalShadows
+}
+
+local aimbotEnabled, aiming, currentTarget = false, false, nil
+local aim2Enabled, aim2ing, aim2Target = false, false, nil
+local lastTargetUpdate, lastTarget2Update = 0, 0
+local hue, lightingHue = 0, 0
+local rainbowSpeed = 0.005
+
+local __serverHopBusy = false
+
+local ALL_BODY_PARTS = {
+    "Head", "HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso",
+    "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm",
+    "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg",
+    "LeftHand", "RightHand", "LeftFoot", "RightFoot"
+}
+
+local fovCircle, fovCircle2, silentFovCircle
+pcall(function()
+    fovCircle = Drawing.new("Circle")
+    fovCircle.Thickness = 2; fovCircle.Radius = settings.fov
+    fovCircle.Filled = false; fovCircle.Color = settings.fovColor
+    fovCircle.Transparency = 1; fovCircle.Visible = false
+end)
+pcall(function()
+    fovCircle2 = Drawing.new("Circle")
+    fovCircle2.Thickness = 2; fovCircle2.Radius = settings.aim2Fov
+    fovCircle2.Filled = false; fovCircle2.Color = settings.aim2FovColor
+    fovCircle2.Transparency = 1; fovCircle2.Visible = false
+end)
+pcall(function()
+    silentFovCircle = Drawing.new("Circle")
+    silentFovCircle.Thickness = 2; silentFovCircle.Radius = silentAim.FOV
+    silentFovCircle.Filled = false; silentFovCircle.Color = silentAim.FovColor
+    silentFovCircle.Transparency = 1; silentFovCircle.Visible = false
+end)
 
 -- ============================================================
 -- HISTORY STORAGE
@@ -302,102 +215,6 @@ local function teleportToJob(targetId, labelText)
 end
 
 -- ============================================================
--- CONFIG
--- ============================================================
-local settings = {
-    fov = 300, smoothing = 0.15, prediction = 0.065,
-    wallCheck = false, teamCheck = false, aimPart = "Auto", aimMode = "Hold",
-    aimKey = Enum.KeyCode.BackSlash, ListeningForAimBind = false,
-    showFovCircle = true, maxDistance = 0, prioritizeClose = true, mode360 = false,
-    fovColor = Color3.fromRGB(255, 0, 0), targetedColor = Color3.fromRGB(0, 255, 0),
-    rainbowFov = false,
-
-    aim2Fov = 300, aim2Smoothing = 0.15, aim2Prediction = 0.065,
-    aim2WallCheck = false, aim2TeamCheck = false, aim2Mode = "Hold",
-    aim2Key = Enum.KeyCode.One, aim2ListeningForBind = false,
-    aim2ShowFovCircle = true, aim2MaxDistance = 0, aim2PrioritizeClose = true,
-    aim2Mode360 = false, aim2HeightOffset = 3,
-    aim2FovColor = Color3.fromRGB(255, 165, 0), aim2TargetedColor = Color3.fromRGB(255, 255, 0),
-    aim2RainbowFov = false,
-
-    xray = false, fullBright = false, nightVision = false,
-    noShadows = false, noBloom = false, noSunRays = false,
-    rainbowLighting = false, noFog = false
-}
-
-local silentAim = {
-    Enabled = false, MasterEnabled = false, Mode = "Hold",
-    HoldKey = Enum.KeyCode.BackSlash, ListeningForBind = false,
-    Prediction = 0.187, FOV = 500, TargetPart = "HumanoidRootPart",
-    ShowFovCircle = true, MaxDistance = 0, PrioritizeClose = true, Mode360 = false,
-    FovColor = Color3.fromRGB(100, 200, 255), CachedTarget = nil, CachedCFrame = nil,
-    Logging = false
-}
-
-local markerClick = {
-    Enabled = false, ModifierKey = Enum.KeyCode.Backquote,
-    ListeningForBind = false, Debug = false, HeightOffset = 3
-}
-
-local ESP = {
-    Enabled = false, Visible = false, Range = math.huge, UpdateRate = 1,
-    Font = Enum.Font.GothamBlack, Size = 0.70, Width = 1.60, Height = 1.10,
-    ShowName = true, ShowHPBar = true, ShowMeter = true, ShowMD = true,
-    ShowHPText = true, ShowDodge = true, Whitelist = {},
-}
-
-local colors = { RainbowSkin = false, RainbowHair = false, SkinSpeed = 0.5, HairSpeed = 0.5, Invert = true }
-local skinTimer, hairTimer = 0, 0
-
-local originalLighting = {
-    Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient,
-    Brightness = Lighting.Brightness, ClockTime = Lighting.ClockTime,
-    FogEnd = Lighting.FogEnd, FogStart = Lighting.FogStart,
-    GlobalShadows = Lighting.GlobalShadows
-}
-
-local aimbotEnabled, aiming, currentTarget = false, false, nil
-local aim2Enabled, aim2ing, aim2Target = false, false, nil
-local lastTargetUpdate, lastTarget2Update = 0, 0
-local hue, lightingHue = 0, 0
-local rainbowSpeed = 0.005
-
-local __serverHopBusy = false
-
-local ALL_BODY_PARTS = {
-    "Head", "HumanoidRootPart", "UpperTorso", "Torso", "LowerTorso",
-    "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm",
-    "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg",
-    "LeftHand", "RightHand", "LeftFoot", "RightFoot"
-}
-
-local fovCircle, fovCircle2, silentFovCircle
-pcall(function()
-    fovCircle = Drawing.new("Circle")
-    fovCircle.Thickness = 2; fovCircle.Radius = settings.fov
-    fovCircle.Filled = false; fovCircle.Color = settings.fovColor
-    fovCircle.Transparency = 1; fovCircle.Visible = false
-end)
-pcall(function()
-    fovCircle2 = Drawing.new("Circle")
-    fovCircle2.Thickness = 2; fovCircle2.Radius = settings.aim2Fov
-    fovCircle2.Filled = false; fovCircle2.Color = settings.aim2FovColor
-    fovCircle2.Transparency = 1; fovCircle2.Visible = false
-end)
-pcall(function()
-    silentFovCircle = Drawing.new("Circle")
-    silentFovCircle.Thickness = 2; silentFovCircle.Radius = silentAim.FOV
-    silentFovCircle.Filled = false; silentFovCircle.Color = silentAim.FovColor
-    silentFovCircle.Transparency = 1; silentFovCircle.Visible = false
-end)
-
-pcall(function()
-    getgenv().Flumium_Drawing_Fov1 = fovCircle
-    getgenv().Flumium_Drawing_Fov2 = fovCircle2
-    getgenv().Flumium_Drawing_FovS = silentFovCircle
-end)
-
--- ============================================================
 -- PING / REGION via IP
 -- ============================================================
 local function getPlayerPing()
@@ -414,75 +231,52 @@ local IP_SERVICES = {
 
 local function fetchServerIP()
     for i, svc in ipairs(IP_SERVICES) do
-        local ok, resp = pcall(function()
-            return game:HttpGet(svc.url, true)
-        end)
+        local ok, resp = pcall(function() return game:HttpGet(svc.url, true) end)
         if ok and type(resp) == "string" and #resp > 0 then
             local ok2, data = pcall(function() return HttpService:JSONDecode(resp) end)
             if ok2 and type(data) == "table" and data[svc.raw] then
                 local ip = tostring(data[svc.raw])
-                if ip:match("^%d+%.%d+%.%d+%.%d+$") then
-                    __dbg("server IP via " .. svc.url .. " → " .. ip)
-                    return ip
-                end
+                if ip:match("^%d+%.%d+%.%d+%.%d+$") then return ip end
             end
             local ip = resp:match("(%d+%.%d+%.%d+%.%d+)")
-            if ip then
-                __dbg("server IP via " .. svc.url .. " (raw) → " .. ip)
-                return ip
-            end
+            if ip then return ip end
         end
     end
-    __dbg("server IP: все сервисы упали")
     return nil
 end
 
 local function geolocateIP(ip)
     if not ip or ip == "" then return nil end
-    local url = "http://ip-api.com/json/" .. ip
-             .. "?fields=status,country,countryCode,region,regionName,city,isp,org,as,lat,lon,timezone,query"
-    local ok, resp = pcall(function()
-        return game:HttpGet(url, true)
-    end)
-    if not ok or type(resp) ~= "string" or resp == "" then
-        return { status = "fail", err = "geolocation http failed", query = ip }
-    end
+    local url = "http://ip-api.com/json/" .. ip .. "?fields=status,country,countryCode,region,regionName,city,isp,org,as,lat,lon,timezone,query"
+    local ok, resp = pcall(function() return game:HttpGet(url, true) end)
+    if not ok or type(resp) ~= "string" or resp == "" then return { status = "fail", err = "geolocation http failed", query = ip } end
     local ok2, data = pcall(function() return HttpService:JSONDecode(resp) end)
-    if not ok2 or type(data) ~= "table" then
-        return { status = "fail", err = "geolocation parse failed", query = ip }
-    end
-    if data.status ~= "success" then
-        return { status = "fail", err = tostring(data.message or "ip-api returned fail"), query = ip }
-    end
+    if not ok2 or type(data) ~= "table" then return { status = "fail", err = "geolocation parse failed", query = ip } end
+    if data.status ~= "success" then return { status = "fail", err = tostring(data.message or "ip-api returned fail"), query = ip } end
     return data
 end
 
 local __serverLocCache = nil
 local function getServerLocation(force)
     if __serverLocCache and not force then return __serverLocCache end
-
     local ip = fetchServerIP()
     if not ip then
         local result = { status = "fail", err = "no server IP" }
         __serverLocCache = result
         return result
     end
-
     local data = geolocateIP(ip)
     if not data then
         local result = { status = "fail", err = "geolocation returned nil", query = ip }
         __serverLocCache = result
         return result
     end
-
     __serverLocCache = data
     return data
 end
 
 local function getClientCountry()
-    local ok, code = pcall(function()
-        return LocalizationService:GetCountryRegionForPlayerAsync(LocalPlayer)
-    end)
+    local ok, code = pcall(function() return LocalizationService:GetCountryRegionForPlayerAsync(LocalPlayer) end)
     if ok and code and code ~= "" then return tostring(code) end
     return "??"
 end
@@ -509,9 +303,7 @@ local COUNTRY_COORDS = {
 
 local function getClientCoords()
     local cc = getClientCountry()
-    if cc and COUNTRY_COORDS[cc] then
-        return COUNTRY_COORDS[cc][1], COUNTRY_COORDS[cc][2], cc
-    end
+    if cc and COUNTRY_COORDS[cc] then return COUNTRY_COORDS[cc][1], COUNTRY_COORDS[cc][2], cc end
     return nil, nil, cc
 end
 
@@ -748,11 +540,11 @@ end
 
 local function startLowDetailWatcher()
     if lowDetailState.DescConn then return end
-    lowDetailState.DescConn = __regConn(Workspace.DescendantAdded:Connect(function(obj)
+    lowDetailState.DescConn = Workspace.DescendantAdded:Connect(function(obj)
         if lowDetailState.Enabled then
             task.defer(function() applyLowDetailToObject(obj) end)
         end
-    end))
+    end)
 end
 
 local function stopLowDetailWatcher()
@@ -1160,28 +952,28 @@ local function espWatch(p)
     if p == LocalPlayer then return end
     if espConns[p] then for _,c in ipairs(espConns[p]) do pcall(function() c:Disconnect() end) end end
     espConns[p] = {}
-    table.insert(espConns[p], __regConn(p.CharacterAdded:Connect(function(char)
+    table.insert(espConns[p], p.CharacterAdded:Connect(function(char)
         if ESP.Enabled and ESP.Visible and isWhitelisted(p) then
             task.defer(function() createPlayerESP(p, char) end)
         end
-    end)))
-    table.insert(espConns[p], __regConn(p.CharacterRemoving:Connect(function() clearPlayer(p) end)))
+    end))
+    table.insert(espConns[p], p.CharacterRemoving:Connect(function() clearPlayer(p) end))
     if p.Character and ESP.Enabled and ESP.Visible and isWhitelisted(p) then
         task.defer(function() createPlayerESP(p, p.Character) end)
     end
 end
 
 for _,p in ipairs(Players:GetPlayers()) do espWatch(p) end
-__regConn(Players.PlayerAdded:Connect(espWatch))
-__regConn(Players.PlayerRemoving:Connect(function(p) clearPlayer(p) end))
-__regConn(RunService.Heartbeat:Connect(function(dt)
+Players.PlayerAdded:Connect(espWatch)
+Players.PlayerRemoving:Connect(function(p) clearPlayer(p) end)
+RunService.Heartbeat:Connect(function(dt)
     if not ESP.Enabled or not ESP.Visible then return end
     espAcc += dt
     if espAcc >= ESP.UpdateRate then espAcc = 0; updateESP() end
-end))
+end)
 
 -- ============================================================
--- KUNAI MARKER HACK
+-- KUNAI MARKER & SILENT AIM (UNIFIED HOOK)
 -- ============================================================
 local savedEnemyPos = nil
 
@@ -1190,7 +982,6 @@ local function getPriorityEnemy()
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
     local myPos = myRoot.Position
-    
     local best = nil
     local bestScore = math.huge
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
@@ -1198,55 +989,23 @@ local function getPriorityEnemy()
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         if settings.teamCheck and p.Team == LocalPlayer.Team then continue end
-        
         local char = p.Character
         if not char then continue end
         local hum = char:FindFirstChild("Humanoid")
         if not hum or hum.Health <= 0 then continue end
-        
         local root = char:FindFirstChild("HumanoidRootPart")
         local head = char:FindFirstChild("Head")
-        
         local aimPos
-        if head then
-            aimPos = head.Position + Vector3.new(0, markerClick.HeightOffset, 0)
-        elseif root then
-            aimPos = root.Position + Vector3.new(0, markerClick.HeightOffset + 2, 0)
-        else
-            continue
-        end
-        
+        if head then aimPos = head.Position + Vector3.new(0, markerClick.HeightOffset, 0)
+        elseif root then aimPos = root.Position + Vector3.new(0, markerClick.HeightOffset + 2, 0)
+        else continue end
         local worldDist = (root and root.Position or aimPos - myPos).Magnitude
         local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
         local screenDist = onScreen and (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude or 9999
         local score = screenDist + (worldDist * 0.1)
-        
-        if score < bestScore then
-            bestScore = score
-            best = aimPos
-        end
+        if score < bestScore then bestScore = score; best = aimPos end
     end
-    
     return best
-end
-
-local function deepLog(t, prefix, depth)
-    depth = depth or 0
-    prefix = prefix or ""
-    if depth > 4 then return end
-    if type(t) == "table" then
-        for k, v in pairs(t) do
-            local vt = typeof(v)
-            if vt == "Vector3" or vt == "CFrame" then
-                print(prefix .. "[" .. tostring(k) .. "] = " .. vt .. " " .. tostring(v))
-            elseif type(v) == "table" then
-                print(prefix .. "[" .. tostring(k) .. "] = table:")
-                deepLog(v, prefix .. "  ", depth + 1)
-            else
-                print(prefix .. "[" .. tostring(k) .. "] = " .. vt .. " " .. tostring(v))
-            end
-        end
-    end
 end
 
 local function replaceVectorInTable(t, newPos, depth)
@@ -1264,99 +1023,70 @@ local function replaceVectorInTable(t, newPos, depth)
     return t
 end
 
-local function isModifierHeld()
-    if not markerClick.Enabled then return false end
-    return UserInputService:IsKeyDown(markerClick.ModifierKey)
-end
+local hookActive = false
+local oldNamecall = nil
+local gameMeta = nil
 
-local kunaiHook = false
-local oldKunaiNamecall = nil
-local kunaiMetaT = nil
-
-local function enableKunaiHook()
-    if kunaiHook then return end
+local function installUnifiedHook()
+    if hookActive then return end
     local ok, err = pcall(function()
-        kunaiMetaT = getrawmetatable(game)
-        oldKunaiNamecall = kunaiMetaT.__namecall
-        setreadonly(kunaiMetaT, false)
-        kunaiMetaT.__namecall = newcclosure(function(self, ...)
+        gameMeta = getrawmetatable(game)
+        oldNamecall = gameMeta.__namecall
+        setreadonly(gameMeta, false)
+        gameMeta.__namecall = newcclosure(function(self, ...)
             local method = getnamecallmethod()
             local args = {...}
-            local nameLower = string.lower(tostring(self.Name))
             
-            local isMarkerEvent = nameLower:find("marker", 1, true) 
-                or nameLower:find("kunai", 1, true) 
-                or nameLower:find("namikaze", 1, true)
-            
-            local isTeleportEvent = nameLower:find("teleport", 1, true)
-            
-            if method == "FireServer" and (isMarkerEvent or isTeleportEvent) then
-                if markerClick.Debug then
-                    print("[HOOK] " .. tostring(self.Name) .. " | args: " .. #args)
-                    for i, a in ipairs(args) do
-                        print("  [" .. i .. "] = " .. typeof(a) .. " " .. tostring(a))
-                        if type(a) == "table" then
-                            deepLog(a, "     ", 0)
-                        end
-                    end
+            -- Silent Aim Logic
+            if silentAim.Enabled and method == "FireServer" and self.Name == "update" then
+                if args[1] == "fixmouse" and silentAim.CachedCFrame then
+                    args[2] = silentAim.CachedCFrame
+                    return oldNamecall(self, table.unpack(args))
                 end
+            end
+            
+            -- Kunai Marker Logic
+            if markerClick.Enabled and method == "FireServer" then
+                local nameLower = string.lower(tostring(self.Name))
+                local isMarkerEvent = nameLower:find("marker", 1, true) or nameLower:find("kunai", 1, true) or nameLower:find("namikaze", 1, true)
+                local isTeleportEvent = nameLower:find("teleport", 1, true)
                 
-                if isModifierHeld() then
-                    local enemyPos = getPriorityEnemy()
-                    if enemyPos then
-                        savedEnemyPos = enemyPos
-                        
-                        for i = 1, #args do
-                            if typeof(args[i]) == "Vector3" then
-                                args[i] = enemyPos
-                            elseif typeof(args[i]) == "CFrame" then
-                                args[i] = CFrame.new(enemyPos)
-                            elseif type(args[i]) == "table" then
-                                args[i] = replaceVectorInTable(args[i], enemyPos, 0)
+                if isMarkerEvent or isTeleportEvent then
+                    if UserInputService:IsKeyDown(markerClick.ModifierKey) then
+                        local enemyPos = getPriorityEnemy()
+                        if enemyPos then
+                            for i = 1, #args do
+                                if typeof(args[i]) == "Vector3" then args[i] = enemyPos
+                                elseif typeof(args[i]) == "CFrame" then args[i] = CFrame.new(enemyPos)
+                                elseif type(args[i]) == "table" then args[i] = replaceVectorInTable(args[i], enemyPos, 0) end
                             end
-                        end
-                        
-                        if markerClick.Debug then
-                            print("[HOOK] ✅ Подменён " .. tostring(self.Name) .. " → " .. tostring(enemyPos))
-                        end
-                        
-                        return oldKunaiNamecall(self, table.unpack(args))
-                    else
-                        if markerClick.Debug then
-                            print("[HOOK] ⚠️ Враг не найден")
+                            return oldNamecall(self, table.unpack(args))
                         end
                     end
                 end
             end
             
-            return oldKunaiNamecall(self, ...)
+            return oldNamecall(self, ...)
         end)
-        setreadonly(kunaiMetaT, true)
-        kunaiHook = true
-        print("✅ Kunai Hook установлен (мульти-событие)")
+        setreadonly(gameMeta, true)
+        hookActive = true
+        print("✅ Unified Hook установлен")
     end)
-    if not ok then warn("❌ Kunai Hook: " .. tostring(err)) end
+    if not ok then warn("❌ Unified Hook: " .. tostring(err)) end
 end
 
-local function disableKunaiHook()
-    if kunaiMetaT and oldKunaiNamecall then
+local function removeUnifiedHook()
+    if gameMeta and oldNamecall then
         pcall(function()
-            setreadonly(kunaiMetaT, false)
-            kunaiMetaT.__namecall = oldKunaiNamecall
-            setreadonly(kunaiMetaT, true)
+            setreadonly(gameMeta, false)
+            gameMeta.__namecall = oldNamecall
+            setreadonly(gameMeta, true)
         end)
     end
-    kunaiHook = false
+    hookActive = false
 end
 
--- ============================================================
--- SILENT AIM
--- ============================================================
-local silentHook = false
-local oldNamecall = nil
-local metaT = nil
-
-__regConn(RunService.Heartbeat:Connect(function()
+RunService.Heartbeat:Connect(function()
     if silentAim.MasterEnabled and silentAim.Mode == "Hold" then
         silentAim.Enabled = UserInputService:IsKeyDown(silentAim.HoldKey)
     end
@@ -1371,7 +1101,6 @@ __regConn(RunService.Heartbeat:Connect(function()
     local bestScore = math.huge
     local cam = Workspace.CurrentCamera
     local MousePos = cam.ViewportSize / 2
-    
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local originPos = myRoot and myRoot.Position or cam.CFrame.Position
@@ -1410,45 +1139,7 @@ __regConn(RunService.Heartbeat:Connect(function()
         local camPos2 = cam.CFrame.Position
         silentAim.CachedCFrame = CFrame.new(targetPos, targetPos + (targetPos - camPos2).Unit)
     end
-end))
-
-local function enableSilentHook()
-    if silentHook then return end
-    local ok, err = pcall(function()
-        metaT = getrawmetatable(game)
-        oldNamecall = metaT.__namecall
-        setreadonly(metaT, false)
-        metaT.__namecall = newcclosure(function(self, ...)
-            local method = getnamecallmethod()
-            local args = {...}
-            if silentAim.Logging and method == "FireServer" and self.Name == "update" then
-                print("[SILENT-LOG] update: args[1]=" .. tostring(args[1]))
-            end
-            if method == "FireServer" and self.Name == "update" then
-                if args[1] == "fixmouse" and silentAim.Enabled and silentAim.CachedCFrame then
-                    args[2] = silentAim.CachedCFrame
-                    return oldNamecall(self, table.unpack(args))
-                end
-            end
-            return oldNamecall(self, ...)
-        end)
-        setreadonly(metaT, true)
-        silentHook = true
-        print("✅ Silent Aim хук установлен")
-    end)
-    if not ok then warn("❌ Silent Aim: " .. tostring(err)) end
-end
-
-local function disableSilentHook()
-    if metaT and oldNamecall then
-        pcall(function()
-            setreadonly(metaT, false)
-            metaT.__namecall = oldNamecall
-            setreadonly(metaT, true)
-        end)
-    end
-    silentHook = false
-end
+end)
 
 -- ============================================================
 -- COLOR CHANGER
@@ -1457,9 +1148,7 @@ local function prepareColor(r, g, b)
     r = math.clamp(math.floor(r), 1, 254)
     g = math.clamp(math.floor(g), 1, 254)
     b = math.clamp(math.floor(b), 1, 254)
-    if colors.Invert then
-        r = 255 - r; g = 255 - g; b = 255 - b
-    end
+    if colors.Invert then r = 255 - r; g = 255 - g; b = 255 - b end
     return string.format("%d,%d,%d", r, g, b)
 end
 
@@ -1467,10 +1156,7 @@ local function setSkinColor(r, g, b)
     if not shindoEvent then return end
     task.spawn(function()
         local char = LocalPlayer.Character
-        if char then
-            char:WaitForChild("Humanoid", 5)
-            char:WaitForChild("Head", 5)
-        end
+        if char then char:WaitForChild("Humanoid", 5); char:WaitForChild("Head", 5) end
         task.wait(0.3)
         local str = prepareColor(r, g, b)
         for i = 1, 3 do
@@ -1485,10 +1171,7 @@ local function setHairColor(r, g, b)
     if not shindoEvent then return end
     task.spawn(function()
         local char = LocalPlayer.Character
-        if char then
-            char:WaitForChild("Humanoid", 5)
-            char:WaitForChild("Head", 5)
-        end
+        if char then char:WaitForChild("Humanoid", 5); char:WaitForChild("Head", 5) end
         task.wait(0.3)
         local str = prepareColor(r, g, b)
         for i = 1, 3 do
@@ -1642,7 +1325,6 @@ local function serverHop()
         return
     end
     __serverHopBusy = true
-
     Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск сервера...", Duration = 2})
     task.spawn(function()
         local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
@@ -1658,20 +1340,17 @@ local function serverHop()
             __serverHopBusy = false
             return
         end
-
         local avail = {}
         for _, s in ipairs(data.data) do
             if s.playing < s.maxPlayers and s.id ~= game.JobId then
                 table.insert(avail, s.id)
             end
         end
-
         if #avail == 0 then
             Fluent:Notify({Title = "❌", Content = "Нет доступных серверов", Duration = 4})
             __serverHopBusy = false
             return
         end
-
         local targetId = avail[math.random(1, #avail)]
         teleportToJob(targetId, "Server Hop")
         task.wait(3)
@@ -1710,7 +1389,7 @@ end
 -- GUI
 -- ============================================================
 local Window = Fluent:CreateWindow({
-    Title = "Flumium Client v1.4 2 Aimbots • ESP • Server Tools • Performance",
+    Title = "Flumium Client v1.4",
     SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
     TabWidth = 160,
     Size = UDim2.fromOffset(600, 520),
@@ -1853,10 +1532,10 @@ local markerSection = Tabs.Aimbot2:AddSection("Kunai Marker")
 markerSection:AddToggle("MarkerClick", { Title = "🌀 Enable Marker Hack", Default = false }):OnChanged(function(v)
     markerClick.Enabled = v
     if v then
-        enableKunaiHook()
+        installUnifiedHook()
         Fluent:Notify({Title = "🌀 Marker ВКЛ", Content = "Зажми " .. markerClick.ModifierKey.Name, Duration = 3})
     else
-        disableKunaiHook()
+        if not silentAim.MasterEnabled then removeUnifiedHook() end
     end
 end)
 local markerBindBtn
@@ -1875,7 +1554,7 @@ markerSection:AddToggle("MarkerDebug", {Title = "🔍 Debug", Default = false}):
 -- ============================================================
 Tabs.Silent:AddToggle("SilentMaster", {Title = "Enable Silent Aim", Default = false}):OnChanged(function(v)
     silentAim.MasterEnabled = v
-    if v then enableSilentHook() else disableSilentHook() end
+    if v then installUnifiedHook() else if not markerClick.Enabled then removeUnifiedHook() end end
 end)
 Tabs.Silent:AddDropdown("SilentMode", { Title = "Режим", Values = {"Hold", "Toggle"}, Default = 1 }):OnChanged(function(v) silentAim.Mode = v end)
 local silentBindButton
@@ -1895,7 +1574,7 @@ Tabs.Silent:AddToggle("SilentPriorClose", {Title = "Prioritize Close", Default =
 Tabs.Silent:AddToggle("SilentMode360", {Title = "360° Mode", Default = false}):OnChanged(function(v) silentAim.Mode360 = v end)
 Tabs.Silent:AddButton({
     Title = "🔄 Переустановить хук",
-    Callback = function() disableSilentHook(); task.wait(0.3); if silentAim.MasterEnabled then enableSilentHook() end end
+    Callback = function() removeUnifiedHook(); task.wait(0.3); if silentAim.MasterEnabled or markerClick.Enabled then installUnifiedHook() end end
 })
 
 -- ============================================================
@@ -2035,11 +1714,11 @@ fpsSection:AddButton({
 local perfStatusPara = Tabs.Performance:AddParagraph({
     Title = "📊 Status", Content = "Low Detail: OFF | FPS: 60 (locked)"
 })
-__regConn(RunService.Heartbeat:Connect(function()
+RunService.Heartbeat:Connect(function()
     local ld = lowDetailState.Enabled and "ON" or "OFF"
     local fps = lowDetailState.FpsUnlocked and tostring(lowDetailState.FpsCap) or "60 (locked)"
     pcall(function() perfStatusPara:SetDesc("Low Detail: " .. ld .. " | FPS: " .. fps) end)
-end))
+end)
 
 -- ============================================================
 -- COLORS TAB
@@ -2321,10 +2000,8 @@ jobSection:AddButton({
 -- ============================================================
 -- BACKGROUND LOOPS
 -- ============================================================
-getgenv().Flumium_LoopsRunning = true
-
 task.spawn(function()
-    while getgenv().Flumium_LoopsRunning and __isCurrentSession() do
+    while true do
         task.wait(1.5)
         local p = getPlayerPing()
         local dot = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
@@ -2335,7 +2012,7 @@ end)
 
 task.spawn(function()
     task.wait(2)
-    while getgenv().Flumium_LoopsRunning and __isCurrentSession() do
+    while true do
         task.wait(60)
         __serverLocCache = nil
         local info = getServerLocation(true)
@@ -2368,7 +2045,7 @@ end)
 -- ============================================================
 -- MAIN LOOP
 -- ============================================================
-__regConn(UserInputService.InputBegan:Connect(function(input, gp)
+UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     if markerClick.ListeningForBind then
         if input.UserInputType == Enum.UserInputType.Keyboard then
@@ -2415,9 +2092,9 @@ __regConn(UserInputService.InputBegan:Connect(function(input, gp)
         if settings.aim2Mode == "Hold" then aim2ing = true
         else aim2ing = not aim2ing; if not aim2ing then aim2Target = nil end end
     end
-end))
+end)
 
-__regConn(UserInputService.InputEnded:Connect(function(input, gp)
+UserInputService.InputEnded:Connect(function(input, gp)
     if gp then return end
     if aimbotEnabled and settings.aimMode == "Hold" and input.KeyCode == settings.aimKey then
         aiming = false; currentTarget = nil
@@ -2425,9 +2102,9 @@ __regConn(UserInputService.InputEnded:Connect(function(input, gp)
     if aim2Enabled and settings.aim2Mode == "Hold" and input.KeyCode == settings.aim2Key then
         aim2ing = false; aim2Target = nil
     end
-end))
+end)
 
-__regConn(RunService.RenderStepped:Connect(function()
+RunService.RenderStepped:Connect(function()
     if settings.rainbowLighting then
         lightingHue = (lightingHue + 0.005) % 1
         local c = Color3.fromHSV(lightingHue, 1, 1)
@@ -2467,9 +2144,9 @@ __regConn(RunService.RenderStepped:Connect(function()
         if t - lastTarget2Update > 0.05 then lastTarget2Update = t; aim2Target = getTarget2() end
         if aim2Target then aimAtTarget2(aim2Target) end
     else aim2Target = nil end
-end))
+end)
 
-__regConn(RunService.Heartbeat:Connect(function(dt)
+RunService.Heartbeat:Connect(function(dt)
     if colors.RainbowSkin and shindoEvent then
         skinTimer = skinTimer + dt
         if skinTimer >= 0.1 then
@@ -2490,117 +2167,38 @@ __regConn(RunService.Heartbeat:Connect(function(dt)
             pcall(function() shindoEvent:FireServer("haircolor", str) end)
         end
     end
-end))
+end)
 
-__regConn(LocalPlayer.CharacterAdded:Connect(function()
+LocalPlayer.CharacterAdded:Connect(function()
     task.wait(2)
     if ESP.Enabled then rebuildESP() end
     if lowDetailState.Enabled then
         task.wait(1)
         applyLowDetailAll()
     end
-end))
+end)
 
 -- ============================================================
 -- UI SETTINGS
 -- ============================================================
 pcall(function()
-    if SaveManager then
-        SaveManager:SetLibrary(Fluent)
-        SaveManager:IgnoreThemeSettings()
-        SaveManager:SetIgnoreIndexes({
-            "ServerHop", "RejoinServer", "ForceReconnect",
-            "RefreshServerInfo",
-            "JoinLastServer", "JobIDInput", "JobHistory",
-            "CopyCurrentJobID", "RefreshJobID", "PasteFromClipboard",
-            "RefreshHistoryList", "ClearHistory",
-        })
-        SaveManager:SetFolder("Flumium/Configs")
-        SaveManager:BuildConfigSection(Tabs.UI)
-        SaveManager:LoadAutoloadConfig()
-    end
-    if InterfaceManager then
-        InterfaceManager:SetLibrary(Fluent)
-        InterfaceManager:SetFolder("Flumium")
-        InterfaceManager:BuildInterfaceSection(Tabs.UI)
-    end
-end)
-
--- ============================================================
--- UNLOAD HOOKS
--- ============================================================
-__regFn(function()
-    getgenv().Flumium_LoopsRunning = false
-end)
-
-__regFn(function()
-    aimbotEnabled = false
-    aiming = false
-    currentTarget = nil
-    aim2Enabled = false
-    aim2ing = false
-    aim2Target = nil
-    silentAim.MasterEnabled = false
-    silentAim.Enabled = false
-    silentAim.CachedTarget = nil
-    silentAim.CachedCFrame = nil
-    markerClick.Enabled = false
-end)
-
-__regFn(function()
-    if type(disableSilentHook) == "function" then pcall(disableSilentHook) end
-    if type(disableKunaiHook)  == "function" then pcall(disableKunaiHook)  end
-end)
-
-__regFn(function()
-    if getgenv().Flumium_TeleportFailedConn then
-        pcall(function() getgenv().Flumium_TeleportFailedConn:Disconnect() end)
-        getgenv().Flumium_TeleportFailedConn = nil
-    end
-end)
-
-__regFn(function()
-    ESP.Enabled = false
-    ESP.Visible = false
-    for p in pairs(espData) do clearPlayer(p) end
-end)
-
-__regFn(function()
-    fastDeactivateLowDetail()
-end)
-
-__regFn(function()
-    colors.RainbowSkin = false
-    colors.RainbowHair = false
-end)
-
-__regFn(function()
-    pcall(function() Window:Destroy() end)
-    pcall(function()
-        local pg = LocalPlayer:FindFirstChild("PlayerGui")
-        if pg then local f = pg:FindFirstChild("Fluent"); if f then f:Destroy() end end
-    end)
-    pcall(function()
-        local cg = game:GetService("CoreGui")
-        if cg then local f = cg:FindFirstChild("Fluent"); if f then f:Destroy() end end
-    end)
-end)
-
-__regFn(function()
-    if fovCircle       then pcall(function() fovCircle:Remove()       end) end
-    if fovCircle2      then pcall(function() fovCircle2:Remove()      end) end
-    if silentFovCircle then pcall(function() silentFovCircle:Remove() end) end
-    getgenv().Flumium_Drawing_Fov1 = nil
-    getgenv().Flumium_Drawing_Fov2 = nil
-    getgenv().Flumium_Drawing_FovS = nil
+    SaveManager:SetLibrary(Fluent)
+    InterfaceManager:SetLibrary(Fluent)
+    SaveManager:IgnoreThemeSettings()
+    SaveManager:SetIgnoreIndexes({})
+    InterfaceManager:SetFolder("Flumium")
+    SaveManager:SetFolder("Flumium/Configs")
+    InterfaceManager:BuildInterfaceSection(Tabs.UI)
+    SaveManager:BuildConfigSection(Tabs.UI)
+    SaveManager:LoadAutoloadConfig()
 end)
 
 print("====================================")
 print("✅ Flumium Client v1.4 загружен!")
-print("📍 Region detection: IP → ip-api (Method 1)")
-print("🚫 Random Server удалён")
-print("🔁 Один клик = одна попытка телепорта")
-print("🎯 Aimbot 2: клавиша [1], целится ВЫШЕ ГОЛОВЫ")
-print("👁️ ESP: HP зелёный, MD фиолетовый, Dodge ON/КД (кейбинд убран)")
+print("👁️ ESP: привязка к Head, StudsOffset 2.5, Dodge CD")
+print("🌀 Kunai Hook & Silent Aim: объединённый хук")
+print("🎭 Silent Aim: \\ (BackSlash)")
+print("🎯 Aimbot 1: \\ (BackSlash)")
+print("🎯 Aimbot 2: [1], целится ВЫШЕ ГОЛОВЫ")
 print("📌 RightControl - скрыть меню")
 print("====================================")
