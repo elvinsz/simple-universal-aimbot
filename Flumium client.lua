@@ -1,9 +1,9 @@
 --[[
-    Flunium Client v1.8
-    ✅ setRemoveParticles через TimeScale (не ломает управление игрой)
-    ✅ Cleanup кэшей при выключении LDM
-    ✅ ESP AlwaysOnTop = true (поверх всего)
-    ✅ Extended LDM + __newindex hook
+    Flunium Client v1.9
+    ✅ LDM больше не включает подтумблеры
+    ✅ Remove Character Effects: полное удаление эффектов через Clear() + Heartbeat
+    ✅ Particles: TimeScale=0 + Clear() + cleanup
+    ✅ ESP AlwaysOnTop = true
     ✅ Autoexec fix + self-heal + Fluent cache
     ✅ Keybinds сохранение
 ]]
@@ -30,7 +30,7 @@ local function Flunium_Boot()
         end)
         if alive then
             pcall(function()
-                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v1.8 уже запущен!", Duration = 3})
+                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v1.9 уже запущен!", Duration = 3})
             end)
             return
         else
@@ -256,7 +256,32 @@ local function Flunium_Boot()
         end)
     end
 
-    -- ✅ ФИКС: TimeScale вместо Enabled — игра не теряет контроль над эмиттерами
+    -- ✅ Particles: TimeScale=0 + Clear() + Heartbeat cleanup
+    local particleCleanupConn = nil
+
+    local function startParticleCleanup()
+        if particleCleanupConn then return end
+        particleCleanupConn = RunService.Heartbeat:Connect(function()
+            if not (perf.removeParticles or perf.lowDetail) then return end
+            pcall(function()
+                for _, obj in ipairs(Workspace:GetDescendants()) do
+                    if obj:IsA("ParticleEmitter") then
+                        if obj.TimeScale == 0 then
+                            pcall(function() obj:Clear() end)
+                        end
+                    end
+                end
+            end)
+        end)
+    end
+
+    local function stopParticleCleanup()
+        if particleCleanupConn then
+            particleCleanupConn:Disconnect()
+            particleCleanupConn = nil
+        end
+    end
+
     local function setRemoveParticles(v)
         perf.removeParticles = v
         pcall(function()
@@ -267,6 +292,7 @@ local function Flunium_Boot()
                             obj:SetAttribute("FluniumTimeScale", obj.TimeScale)
                         end
                         obj.TimeScale = 0
+                        pcall(function() obj:Clear() end)
                     else
                         local ts = obj:GetAttribute("FluniumTimeScale")
                         if ts ~= nil then
@@ -277,6 +303,9 @@ local function Flunium_Boot()
                 end
             end
         end)
+        if v then startParticleCleanup() else
+            if not perf.removeCharFx then stopParticleCleanup() end
+        end
     end
 
     local function setRemoveShadows(v)
@@ -380,41 +409,61 @@ local function Flunium_Boot()
         end)
     end
 
-    local function setRemoveCharFx(v)
-        perf.removeCharFx = v
+    -- ✅ Remove Character Effects: полное удаление, а не остановка
+    local charFxCleanupConn = nil
+
+    local function killCharFx(char)
         pcall(function()
-            for _, plr in ipairs(Players:GetPlayers()) do
-                local char = plr.Character
-                if char then
-                    for _, obj in ipairs(char:GetDescendants()) do
-                        if obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail")
-                           or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles")
-                           or obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight")
-                           or obj:IsA("Highlight") then
-                            pcall(function()
-                                if v then
-                                    if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-                                        if not obj:GetAttribute("FluniumTimeScale") then
-                                            obj:SetAttribute("FluniumTimeScale", obj.TimeScale)
-                                        end
-                                        obj.TimeScale = 0
-                                    else
-                                        obj.Enabled = false
-                                    end
-                                else
-                                    if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-                                        local ts = obj:GetAttribute("FluniumTimeScale")
-                                        if ts ~= nil then obj.TimeScale = ts; obj:SetAttribute("FluniumTimeScale", nil) end
-                                    else
-                                        obj.Enabled = true
-                                    end
-                                end
-                            end)
-                        end
-                    end
+            for _, obj in ipairs(char:GetDescendants()) do
+                if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                    pcall(function() obj:Clear() end)
+                    pcall(function() obj.Enabled = false end)
+                elseif obj:IsA("Beam") or obj:IsA("Trail") then
+                    pcall(function() obj.Enabled = false end)
+                elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+                    pcall(function() obj.Enabled = false end)
+                elseif obj:IsA("Highlight") then
+                    pcall(function() obj.Enabled = false end)
                 end
             end
         end)
+    end
+
+    local function startCharFxCleanup()
+        if charFxCleanupConn then return end
+        charFxCleanupConn = RunService.Heartbeat:Connect(function()
+            if not perf.removeCharFx then return end
+            pcall(function()
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    local char = plr.Character
+                    if char then killCharFx(char) end
+                end
+            end)
+        end)
+    end
+
+    local function stopCharFxCleanup()
+        if charFxCleanupConn then
+            charFxCleanupConn:Disconnect()
+            charFxCleanupConn = nil
+        end
+    end
+
+    local function setRemoveCharFx(v)
+        perf.removeCharFx = v
+        if v then
+            pcall(function()
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    local char = plr.Character
+                    if char then killCharFx(char) end
+                end
+            end)
+            startCharFxCleanup()
+            startParticleCleanup()
+        else
+            stopCharFxCleanup()
+            if not perf.removeParticles then stopParticleCleanup() end
+        end
     end
 
     local function setFpsUnlock(v)
@@ -551,7 +600,7 @@ local function Flunium_Boot()
         gui.Name = "SimpleESP"
         gui.Size = UDim2.new(0, 200, 0, 90)
         gui.StudsOffset = Vector3.new(0, 4, 0)
-        gui.AlwaysOnTop = true         -- ✅ ВЕРНУЛ: поверх всего
+        gui.AlwaysOnTop = true
         gui.LightInfluence = 0
         gui.ResetOnSpawn = false
         gui.Adornee = root
@@ -1001,7 +1050,7 @@ local function Flunium_Boot()
     -- ══════════ GUI ══════════
 
     local Window = Fluent:CreateWindow({
-        Title = "Flunium Client v1.8",
+        Title = "Flunium Client v1.9",
         SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
         TabWidth = 160,
         Size = UDim2.fromOffset(600, 520),
@@ -1261,30 +1310,27 @@ local function Flunium_Boot()
 
     Tabs.Performance:AddParagraph({
         Title = "⚡ Performance Tools",
-        Content = "Low Detail Mode — убирает текстуры, тени, частицы, свет. FPS Unlocker — снимает лимит кадров."
+        Content = "Low Detail Mode — базовые настройки (textures, decals, particles, shadows, postfx, water). Расширенные настройки ниже — включаются отдельно."
     })
     Tabs.Performance:AddToggle("LowDetail", {Title = "Low Detail Mode",
-        Description = "Отключает текстуры, decals, частицы, тени, воду, свет, post-processing",
+        Description = "Отключает только базовое: textures, decals, particles, shadows, postfx, water",
         Default = false
     }):OnChanged(function(v)
         perf.lowDetail = v
+        -- ✅ LDM больше НЕ трогает расширенные тумблеры
         if v then
             setRemoveTextures(true); setRemoveDecals(true); setRemoveParticles(true)
             setRemoveShadows(true); setDisablePostFx(true); setOptimizeWater(true)
-            setRemoveLights(true); setRemoveBeams(true); setRemoveHighlights(true)
-            setHideAccessories(true); setRemoveCharFx(true)
         else
             setRemoveTextures(false); setRemoveDecals(false); setRemoveParticles(false)
             setRemoveShadows(false); setDisablePostFx(false); setOptimizeWater(false)
-            setRemoveLights(false); setRemoveBeams(false); setRemoveHighlights(false)
-            setHideAccessories(false); setRemoveCharFx(false)
             perf.cachedProps = {}
             perf.cachedLight = {}
         end
     end)
     Tabs.Performance:AddToggle("RemoveTextures", {Title = "Remove Textures", Default = false}):OnChanged(setRemoveTextures)
     Tabs.Performance:AddToggle("RemoveDecals", {Title = "Remove Decals", Default = false}):OnChanged(setRemoveDecals)
-    Tabs.Performance:AddToggle("RemoveParticles", {Title = "Remove Particles (TimeScale)", Default = false}):OnChanged(setRemoveParticles)
+    Tabs.Performance:AddToggle("RemoveParticles", {Title = "Remove Particles (TimeScale+Clear)", Default = false}):OnChanged(setRemoveParticles)
     Tabs.Performance:AddToggle("RemoveShadows", {Title = "Remove Shadows", Default = false}):OnChanged(setRemoveShadows)
     Tabs.Performance:AddToggle("ForcePlastic", {Title = "Force Plastic Material", Default = false}):OnChanged(setForcePlastic)
     Tabs.Performance:AddToggle("DisablePost", {Title = "Disable Post-Processing", Default = false}):OnChanged(setDisablePostFx)
@@ -1294,7 +1340,7 @@ local function Flunium_Boot()
     Tabs.Performance:AddToggle("RemoveBeams", {Title = "Remove Beams & Trails", Default = false}):OnChanged(setRemoveBeams)
     Tabs.Performance:AddToggle("RemoveHighlights", {Title = "Remove Highlights", Default = false}):OnChanged(setRemoveHighlights)
     Tabs.Performance:AddToggle("HideAccessories", {Title = "Hide Accessories (hair/clothes)", Default = false}):OnChanged(setHideAccessories)
-    Tabs.Performance:AddToggle("RemoveCharFx", {Title = "Remove Character Effects", Default = false}):OnChanged(setRemoveCharFx)
+    Tabs.Performance:AddToggle("RemoveCharFx", {Title = "Remove Character Effects (full)", Default = false}):OnChanged(setRemoveCharFx)
     Tabs.Performance:AddToggle("BlockNewFx", {Title = "Block New Effects (__newindex hook)", Default = false}):OnChanged(function(v)
         perf.blockNewEffects = v
         if v and not unifiedHook then enableUnifiedHook() end
@@ -1772,11 +1818,11 @@ local function Flunium_Boot()
     end)
 
     print("====================================")
-    print("✅ Flunium Client v1.8 загружен!")
-    print("👁️ ESP: AlwaysOnTop=true, Adornee=Root, LightInfluence=0")
-    print("⚡ Particles: TimeScale=0 (не ломает управление игрой)")
+    print("✅ Flunium Client v1.9 загружен!")
+    print("⚡ LDM больше не включает подтумблеры")
+    print("👁️ Remove Character Effects: полное удаление через Clear()")
+    print("👁️ ESP: AlwaysOnTop=true")
     print("🎯 Aimbot 1 + Aimbot 2 + Silent Aim")
-    print("🌐 Server tab + Performance tab")
     print("💾 Keybinds сохраняются в конфиг")
     print("📌 RightControl - скрыть меню")
     print("====================================")
