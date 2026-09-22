@@ -1,15 +1,14 @@
 --[[
-    Flunium Client v1.5
+    Flunium Client v1.6
+    ✅ Фикс розовых квадратов: AlwaysOnTop=false, Adornee=HumanoidRootPart, LightInfluence=0
     ✅ Autoexec-баг исправлен: флаг ставится только после полной загрузки
     ✅ Self-heal: если Fluent мёртв — перезагрузка без рестарта Roblox
-    ✅ Cleanup старых GUI перед повторным запуском
-    ✅ Локальный кэш Fluent (GitHub нужен только 1 раз)
+    ✅ Локальный кэш Fluent
     ✅ Keybinds сохраняются через SaveManager
 ]]
 
 local function Flunium_Boot()
 
-    -- ✅ Проверяем: есть ли уже загруженный и ЖИВОЙ Fluent
     local existingFluent = getgenv().FluniumFluent
     local existingLoaded = getgenv().FluniumLoaded
     
@@ -28,14 +27,9 @@ local function Flunium_Boot()
                 end
             end
         end)
-        
         if alive then
             pcall(function()
-                existingFluent:Notify({
-                    Title = "⚠️ Уже загружено",
-                    Content = "Flunium Client v1.5 уже запущен!",
-                    Duration = 3
-                })
+                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v1.6 уже запущен!", Duration = 3})
             end)
             return
         else
@@ -45,19 +39,15 @@ local function Flunium_Boot()
         end
     end
     
-    -- ✅ Чистим старые GUI Fluent
     pcall(function()
         local pg = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
         if pg then
             for _, child in ipairs(pg:GetChildren()) do
-                if child.Name == "Fluent" or child.Name:find("Fluent") then
-                    child:Destroy()
-                end
+                if child.Name == "Fluent" or child.Name:find("Fluent") then child:Destroy() end
             end
         end
     end)
     
-    -- ✅ Загружаем Fluent (с локальным кэшем)
     local Fluent
     local fluentUrl = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
     local fluentCache = "FluniumFluent.lua"
@@ -102,8 +92,6 @@ local function Flunium_Boot()
     local shindoEvent
     pcall(function() shindoEvent = LocalPlayer:WaitForChild("startevent", 8) end)
 
-    --> [< НАСТРОЙКИ >] <--
-
     local settings = {
         fov = 300, smoothing = 0.15, prediction = 0.065,
         wallCheck = false, teamCheck = false,
@@ -114,7 +102,6 @@ local function Flunium_Boot()
         fovColor = Color3.fromRGB(255, 0, 0),
         targetedColor = Color3.fromRGB(0, 255, 0),
         rainbowFov = false,
-        
         aim2Fov = 300, aim2Smoothing = 0.15, aim2Prediction = 0.065,
         aim2WallCheck = false, aim2TeamCheck = false,
         aim2Mode = "Hold", aim2Key = Enum.KeyCode.One,
@@ -124,7 +111,6 @@ local function Flunium_Boot()
         aim2FovColor = Color3.fromRGB(255, 165, 0),
         aim2TargetedColor = Color3.fromRGB(255, 255, 0),
         aim2RainbowFov = false,
-        
         xray = false, fullBright = false, nightVision = false,
         noShadows = false, noBloom = false, noSunRays = false,
         rainbowLighting = false, noFog = false
@@ -165,10 +151,7 @@ local function Flunium_Boot()
         cachedFog = {FogEnd = Lighting.FogEnd, FogStart = Lighting.FogStart},
     }
 
-    local colors = {
-        RainbowSkin = false, RainbowHair = false,
-        SkinSpeed = 0.5, HairSpeed = 0.5, Invert = true
-    }
+    local colors = {RainbowSkin = false, RainbowHair = false, SkinSpeed = 0.5, HairSpeed = 0.5, Invert = true}
     local skinTimer, hairTimer = 0, 0
 
     local originalLighting = {
@@ -211,7 +194,7 @@ local function Flunium_Boot()
         silentFovCircle.Transparency = 1; silentFovCircle.Visible = false
     end)
 
-    --> [< PERFORMANCE >] <--
+    -- PERFORMANCE
 
     local function applyLowDetail()
         pcall(function()
@@ -254,9 +237,7 @@ local function Flunium_Boot()
         perf.removeTextures = v
         pcall(function()
             for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("Decal") or obj:IsA("Texture") then
-                    obj.Transparency = v and 1 or 0
-                end
+                if obj:IsA("Decal") or obj:IsA("Texture") then obj.Transparency = v and 1 or 0 end
             end
         end)
     end
@@ -306,12 +287,8 @@ local function Flunium_Boot()
 
     local function setExtendFog(v)
         perf.extendFog = v
-        if v then
-            Lighting.FogEnd = 100000; Lighting.FogStart = 100000
-        else
-            Lighting.FogEnd = perf.cachedFog.FogEnd
-            Lighting.FogStart = perf.cachedFog.FogStart
-        end
+        if v then Lighting.FogEnd = 100000; Lighting.FogStart = 100000
+        else Lighting.FogEnd = perf.cachedFog.FogEnd; Lighting.FogStart = perf.cachedFog.FogStart end
     end
 
     local function setOptimizeWater(v)
@@ -337,7 +314,7 @@ local function Flunium_Boot()
         end
     end
 
-    --> [< HISTORY >] <--
+    -- HISTORY
 
     local lastJobHistory = {}
     local historyFile = "FluniumHistory.json"
@@ -382,7 +359,7 @@ local function Flunium_Boot()
         return ok and ip or "Unknown"
     end
 
-    --> [< ESP >] <--
+    -- ESP
 
     local espData, espConns, espAcc = {}, {}, 0
     local function getRoot(char)
@@ -452,23 +429,33 @@ local function Flunium_Boot()
     local function createPlayerESP(p, char)
         if p == LocalPlayer or not isWhitelisted(p) then return end
         if espData[p] and espData[p].gui and espData[p].gui.Parent then return end
-        local head = char:FindFirstChild("Head") or getRoot(char)
+        
+        local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head") or getRoot(char)
         local hum = getHumanoid(char)
-        if not head or not hum then return end
+        if not root or not hum then return end
+        
         local gui = Instance.new("BillboardGui")
-        gui.Name = "SimpleESP"; gui.Size = UDim2.new(0, 200, 0, 90)
-        gui.StudsOffset = Vector3.new(0, 3, 0); gui.AlwaysOnTop = true
-        gui.ResetOnSpawn = false; gui.Adornee = head
-        gui.MaxDistance = ESP.Range; gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+        gui.Name = "SimpleESP"
+        gui.Size = UDim2.new(0, 200, 0, 90)
+        gui.StudsOffset = Vector3.new(0, 4, 0)      -- ✅ подняли над головой
+        gui.AlwaysOnTop = false                      -- ✅ ФИКС: не перекрывает частицы
+        gui.LightInfluence = 0                       -- ✅ ФИКС: не темнеет в тени
+        gui.ResetOnSpawn = false
+        gui.Adornee = root                           -- ✅ ФИКС: root вместо head
+        gui.MaxDistance = ESP.Range
+        gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+        
         local holder = Instance.new("Frame", gui)
         holder.Size = UDim2.fromScale(1, 1); holder.BackgroundTransparency = 1
         Instance.new("UIScale", holder).Scale = ESP.Size
+        
         local nameLabel = makeLabel(holder, UDim2.new(1, 0, 0, 20), UDim2.new(0, 0, 0, 0), ESP.NameColor, 16)
         nameLabel.Text = p.Name
         local hpLabel = makeLabel(holder, UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 22), ESP.HPColor, 16)
         local mdLabel = makeLabel(holder, UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 42), ESP.MDColor, 16)
         local dodgeLabel = makeLabel(holder, UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 62), ESP.DodgeOnColor, 16)
-        espData[p] = {gui=gui, char=char, head=head, hum=hum, nameLabel=nameLabel,
+        
+        espData[p] = {gui=gui, char=char, root=root, hum=hum, nameLabel=nameLabel,
             hpLabel=hpLabel, mdLabel=mdLabel, dodgeLabel=dodgeLabel, hp=-1, md=-1, dodgeState=-1}
     end
     local function updateESP()
@@ -476,15 +463,15 @@ local function Flunium_Boot()
         for p, d in pairs(espData) do
             if not p.Parent or not d.char or not d.char.Parent then clearPlayer(p); continue end
             if not isWhitelisted(p) then if d.gui then d.gui.Enabled = false end; continue end
-            if not d.head or not d.head.Parent then
-                d.head = d.char:FindFirstChild("Head") or getRoot(d.char)
-                if d.gui then d.gui.Adornee = d.head end
+            if not d.root or not d.root.Parent then
+                d.root = d.char:FindFirstChild("HumanoidRootPart") or d.char:FindFirstChild("Head")
+                if d.gui then d.gui.Adornee = d.root end
             end
             if not d.hum or not d.hum.Parent then d.hum = getHumanoid(d.char) end
-            if not d.gui or not d.head or not d.hum or d.hum.Health <= 0 then
+            if not d.gui or not d.root or not d.hum or d.hum.Health <= 0 then
                 if d.gui then d.gui.Enabled = false end; continue
             end
-            d.gui.Enabled = true; d.gui.Adornee = d.head
+            d.gui.Enabled = true; d.gui.Adornee = d.root
             if ESP.ShowName then d.nameLabel.Visible = true; d.nameLabel.Text = p.Name else d.nameLabel.Visible = false end
             local hp = math.floor(d.hum.Health)
             if d.hp ~= hp then d.hp = hp; d.hpLabel.Text = "HP: " .. short(hp) end
@@ -544,7 +531,7 @@ local function Flunium_Boot()
         if espAcc >= ESP.UpdateRate then espAcc = 0; updateESP() end
     end)
 
-    --> [< UNIFIED HOOK >] <--
+    -- UNIFIED HOOK
 
     local savedEnemyPos = nil
     local function getPriorityEnemy()
@@ -645,8 +632,6 @@ local function Flunium_Boot()
         unifiedHook = false
     end
 
-    --> [< SILENT LOGIC >] <--
-
     RunService.Heartbeat:Connect(function()
         if silentAim.MasterEnabled and silentAim.Mode == "Hold" then
             silentAim.Enabled = UserInputService:IsKeyDown(silentAim.HoldKey)
@@ -692,7 +677,7 @@ local function Flunium_Boot()
         end
     end)
 
-    --> [< AIMBOTS >] <--
+    -- AIMBOTS
 
     local function getBestAimPart(char, customPart)
         if not char then return nil end
@@ -826,7 +811,7 @@ local function Flunium_Boot()
         Camera.CFrame = cur:Lerp(CFrame.new(cur.Position, pos), math.clamp(1 - settings.aim2Smoothing, 0.05, 1))
     end
 
-    --> [< SERVER >] <--
+    -- SERVER
 
     local function serverHop()
         Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск...", Duration = 3})
@@ -868,8 +853,7 @@ local function Flunium_Boot()
 
     local function joinByJobId(jobId)
         if not jobId or jobId == "" then
-            Fluent:Notify({Title = "❌", Content = "Job ID пустой", Duration = 3})
-            return
+            Fluent:Notify({Title = "❌", Content = "Job ID пустой", Duration = 3}); return
         end
         addJobToHistory(jobId, game.PlaceId)
         pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer) end)
@@ -877,17 +861,16 @@ local function Flunium_Boot()
 
     local function joinLastServer()
         if #lastJobHistory == 0 then
-            Fluent:Notify({Title = "❌", Content = "История пуста", Duration = 3})
-            return
+            Fluent:Notify({Title = "❌", Content = "История пуста", Duration = 3}); return
         end
         local last = lastJobHistory[1]
         pcall(function() TeleportService:TeleportToPlaceInstance(last.place or game.PlaceId, last.id, LocalPlayer) end)
     end
 
-    --> [< GUI >] <--
+    -- GUI
 
     local Window = Fluent:CreateWindow({
-        Title = "Flunium Client v1.5",
+        Title = "Flunium Client v1.6",
         SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
         TabWidth = 160,
         Size = UDim2.fromOffset(600, 520),
@@ -909,8 +892,6 @@ local function Flunium_Boot()
     }
 
     local Options = Fluent.Options
-
-    --> [< AIMBOT 1 >] <--
 
     Tabs.Aimbot:AddToggle("AimOn", {Title = "Enable Aimbot", Default = false}):OnChanged(function(v)
         aimbotEnabled = v
@@ -964,8 +945,6 @@ local function Flunium_Boot()
     end)
     Tabs.Aimbot:AddToggle("WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.wallCheck = v end)
     Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.teamCheck = v end)
-
-    --> [< AIMBOT 2 >] <--
 
     Tabs.Aimbot2:AddParagraph({Title = "🎯 Aimbot 2 — Headshot", Content = "Целится ВЫШЕ головы. По умолчанию на клавише [1]"})
     Tabs.Aimbot2:AddToggle("Aim2On", {Title = "Enable Aimbot 2", Default = false}):OnChanged(function(v)
@@ -1023,8 +1002,6 @@ local function Flunium_Boot()
     Tabs.Aimbot2:AddToggle("Aim2WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.aim2WallCheck = v end)
     Tabs.Aimbot2:AddToggle("Aim2TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.aim2TeamCheck = v end)
 
-    --> [< KUNAI MARKER >] <--
-
     local markerSection = Tabs.Aimbot2:AddSection("Kunai Marker")
     markerSection:AddToggle("MarkerClick", {Title = "🌀 Enable Marker Hack", Default = false}):OnChanged(function(v)
         markerClick.Enabled = v
@@ -1048,8 +1025,6 @@ local function Flunium_Boot()
         markerClick.HeightOffset = v
     end)
     markerSection:AddToggle("MarkerDebug", {Title = "🔍 Debug", Default = false}):OnChanged(function(v) markerClick.Debug = v end)
-
-    --> [< SILENT TAB >] <--
 
     Tabs.Silent:AddToggle("SilentMaster", {Title = "Enable Silent Aim", Default = false}):OnChanged(function(v)
         silentAim.MasterEnabled = v
@@ -1091,8 +1066,6 @@ local function Flunium_Boot()
             if silentAim.MasterEnabled or markerClick.Enabled then enableUnifiedHook() end
         end
     })
-
-    --> [< ESP TAB >] <--
 
     Tabs.ESP:AddToggle("ESPOn", {Title = "Enable ESP",
         Description = "Показывает HP (зелёный), MD (фиолетовый), Dodge (ON/КД)",
@@ -1155,8 +1128,6 @@ local function Flunium_Boot()
         end
     })
 
-    --> [< PERFORMANCE TAB >] <--
-
     Tabs.Performance:AddParagraph({
         Title = "⚡ Performance Tools",
         Content = "Low Detail Mode — убирает текстуры, тени и частицы. FPS Unlocker — снимает лимит кадров."
@@ -1209,8 +1180,6 @@ local function Flunium_Boot()
             end)
         end
     end)
-
-    --> [< COLORS TAB >] <--
 
     Tabs.Colors:AddToggle("InvertColors", {Title = "Инвертировать цвет", Default = true}):OnChanged(function(v) colors.Invert = v end)
     Tabs.Colors:AddToggle("RainbowSkin", {Title = "Rainbow Skin", Default = false}):OnChanged(function(v) colors.RainbowSkin = v end)
@@ -1274,8 +1243,6 @@ local function Flunium_Boot()
             end
         end
     })
-
-    --> [< VISUAL TAB >] <--
 
     Tabs.Visual:AddToggle("XRay", {Title = "X-Ray", Default = false}):OnChanged(function(v)
         settings.xray = v
@@ -1347,8 +1314,6 @@ local function Flunium_Boot()
         end
     end)
 
-    --> [< SERVER TAB >] <--
-
     local jobIdPara = Tabs.Server:AddParagraph({Title = "📋 Current Job ID", Content = tostring(game.JobId)})
     Tabs.Server:AddButton({
         Title = "📄 Скопировать текущий Job ID",
@@ -1362,9 +1327,7 @@ local function Flunium_Boot()
     })
     Tabs.Server:AddButton({
         Title = "🔄 Обновить Job ID",
-        Callback = function()
-            pcall(function() jobIdPara:SetDesc(tostring(game.JobId)) end)
-        end
+        Callback = function() pcall(function() jobIdPara:SetDesc(tostring(game.JobId)) end) end
     })
 
     local joinIdBox = Tabs.Server:AddInput("JoinJobId", {
@@ -1442,9 +1405,7 @@ local function Flunium_Boot()
     Tabs.Server:AddButton({
         Title = "🔄 Обновить данные о сервере",
         Description = "Перезапрашивает IP и геолокацию сервера",
-        Callback = function()
-            Fluent:Notify({Title = "🔄", Content = "Обновление...", Duration = 2})
-        end
+        Callback = function() Fluent:Notify({Title = "🔄", Content = "Обновление...", Duration = 2}) end
     })
 
     task.spawn(function()
@@ -1465,8 +1426,6 @@ local function Flunium_Boot()
             end)
         end
     end)
-
-    --> [< ВВОД >] <--
 
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
@@ -1516,8 +1475,6 @@ local function Flunium_Boot()
             aim2ing = false; aim2Target = nil
         end
     end)
-
-    --> [< ГЛАВНЫЙ ЦИКЛ >] <--
 
     RunService.RenderStepped:Connect(function()
         if aimbotEnabled and settings.aimMode == "Hold" then
@@ -1608,8 +1565,6 @@ local function Flunium_Boot()
         if ESP.Enabled then rebuildESP() end
     end)
 
-    --> [< UI SETTINGS + КОНФИГ >] <--
-
     pcall(function()
         SaveManager:SetLibrary(Fluent)
         InterfaceManager:SetLibrary(Fluent)
@@ -1671,7 +1626,8 @@ local function Flunium_Boot()
     end)
 
     print("====================================")
-    print("✅ Flunium Client v1.5 загружен!")
+    print("✅ Flunium Client v1.6 загружен!")
+    print("👁️ ESP фикс: AlwaysOnTop=false, Adornee=Root, LightInfluence=0")
     print("🎯 Aimbot 1 + Aimbot 2 + Silent Aim")
     print("⚡ Performance tab + FPS Unlocker")
     print("🌐 Server tab: Job ID, History, IP, Region")
@@ -1679,7 +1635,6 @@ local function Flunium_Boot()
     print("📌 RightControl - скрыть меню")
     print("====================================")
 
-    -- ✅ ФЛАГ СТАВИТСЯ ТОЛЬКО ЗДЕСЬ, ПОСЛЕ ПОЛНОЙ ЗАГРУЗКИ
     getgenv().FluniumLoaded = true
 
 end
