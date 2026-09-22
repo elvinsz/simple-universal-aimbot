@@ -1,10 +1,11 @@
 --[[
-    Flunium Client v1.6
-    ✅ Фикс розовых квадратов: AlwaysOnTop=false, Adornee=HumanoidRootPart, LightInfluence=0
-    ✅ Autoexec-баг исправлен: флаг ставится только после полной загрузки
-    ✅ Self-heal: если Fluent мёртв — перезагрузка без рестарта Roblox
-    ✅ Локальный кэш Fluent
-    ✅ Keybinds сохраняются через SaveManager
+    Flunium Client v1.8
+    ✅ setRemoveParticles через TimeScale (не ломает управление игрой)
+    ✅ Cleanup кэшей при выключении LDM
+    ✅ ESP AlwaysOnTop = true (поверх всего)
+    ✅ Extended LDM + __newindex hook
+    ✅ Autoexec fix + self-heal + Fluent cache
+    ✅ Keybinds сохранение
 ]]
 
 local function Flunium_Boot()
@@ -29,7 +30,7 @@ local function Flunium_Boot()
         end)
         if alive then
             pcall(function()
-                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v1.6 уже запущен!", Duration = 3})
+                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v1.8 уже запущен!", Duration = 3})
             end)
             return
         else
@@ -146,9 +147,13 @@ local function Flunium_Boot()
         lowDetail = false, removeTextures = false, removeDecals = false,
         removeParticles = false, removeShadows = false, forcePlastic = false,
         disablePostFx = false, extendFog = false, optimizeWater = false,
+        removeLights = false, removeBeams = false, removeHighlights = false,
+        hideAccessories = false, removeCharFx = false,
+        blockNewEffects = false,
         fpsUnlock = false, fpsCap = 999,
         cachedProps = {},
         cachedFog = {FogEnd = Lighting.FogEnd, FogStart = Lighting.FogStart},
+        cachedLight = {},
     }
 
     local colors = {RainbowSkin = false, RainbowHair = false, SkinSpeed = 0.5, HairSpeed = 0.5, Invert = true}
@@ -194,7 +199,7 @@ local function Flunium_Boot()
         silentFovCircle.Transparency = 1; silentFovCircle.Visible = false
     end)
 
-    -- PERFORMANCE
+    -- ══════════ PERFORMANCE ══════════
 
     local function applyLowDetail()
         pcall(function()
@@ -251,12 +256,24 @@ local function Flunium_Boot()
         end)
     end
 
+    -- ✅ ФИКС: TimeScale вместо Enabled — игра не теряет контроль над эмиттерами
     local function setRemoveParticles(v)
         perf.removeParticles = v
         pcall(function()
             for _, obj in ipairs(Workspace:GetDescendants()) do
                 if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-                    obj.Enabled = not v
+                    if v then
+                        if not obj:GetAttribute("FluniumTimeScale") then
+                            obj:SetAttribute("FluniumTimeScale", obj.TimeScale)
+                        end
+                        obj.TimeScale = 0
+                    else
+                        local ts = obj:GetAttribute("FluniumTimeScale")
+                        if ts ~= nil then
+                            obj.TimeScale = ts
+                            obj:SetAttribute("FluniumTimeScale", nil)
+                        end
+                    end
                 end
             end
         end)
@@ -299,6 +316,102 @@ local function Flunium_Boot()
                     obj.WaterWaveSize = v and 0 or obj.WaterWaveSize
                     obj.WaterReflectance = v and 0 or obj.WaterReflectance
                     obj.WaterTransparency = v and 1 or obj.WaterTransparency
+                end
+            end
+        end)
+    end
+
+    local function setRemoveLights(v)
+        perf.removeLights = v
+        pcall(function()
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+                    if not perf.cachedLight[obj] then
+                        perf.cachedLight[obj] = {Enabled = obj.Enabled, Range = obj.Range, Brightness = obj.Brightness}
+                    end
+                    obj.Enabled = not v
+                    if v then
+                        obj.Range = 0
+                        obj.Brightness = 0
+                    else
+                        local c = perf.cachedLight[obj]
+                        if c then obj.Range = c.Range; obj.Brightness = c.Brightness end
+                    end
+                end
+            end
+        end)
+    end
+
+    local function setRemoveBeams(v)
+        perf.removeBeams = v
+        pcall(function()
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("Beam") or obj:IsA("Trail") then
+                    obj.Enabled = not v
+                end
+            end
+        end)
+    end
+
+    local function setRemoveHighlights(v)
+        perf.removeHighlights = v
+        pcall(function()
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("Highlight") or obj:IsA("SelectionBox")
+                   or obj:IsA("BoxHandleAdornment") or obj:IsA("SelectionSphere") then
+                    obj.Enabled = not v
+                end
+            end
+        end)
+    end
+
+    local function setHideAccessories(v)
+        perf.hideAccessories = v
+        pcall(function()
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("Accessory") or obj:IsA("Hat") then
+                    local handle = obj:FindFirstChild("Handle")
+                    if handle then
+                        handle.Transparency = v and 1 or 0
+                        handle.LocalTransparencyModifier = v and 1 or 0
+                    end
+                end
+            end
+        end)
+    end
+
+    local function setRemoveCharFx(v)
+        perf.removeCharFx = v
+        pcall(function()
+            for _, plr in ipairs(Players:GetPlayers()) do
+                local char = plr.Character
+                if char then
+                    for _, obj in ipairs(char:GetDescendants()) do
+                        if obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail")
+                           or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles")
+                           or obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight")
+                           or obj:IsA("Highlight") then
+                            pcall(function()
+                                if v then
+                                    if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                                        if not obj:GetAttribute("FluniumTimeScale") then
+                                            obj:SetAttribute("FluniumTimeScale", obj.TimeScale)
+                                        end
+                                        obj.TimeScale = 0
+                                    else
+                                        obj.Enabled = false
+                                    end
+                                else
+                                    if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                                        local ts = obj:GetAttribute("FluniumTimeScale")
+                                        if ts ~= nil then obj.TimeScale = ts; obj:SetAttribute("FluniumTimeScale", nil) end
+                                    else
+                                        obj.Enabled = true
+                                    end
+                                end
+                            end)
+                        end
+                    end
                 end
             end
         end)
@@ -359,7 +472,7 @@ local function Flunium_Boot()
         return ok and ip or "Unknown"
     end
 
-    -- ESP
+    -- ══════════ ESP ══════════
 
     local espData, espConns, espAcc = {}, {}, 0
     local function getRoot(char)
@@ -437,11 +550,11 @@ local function Flunium_Boot()
         local gui = Instance.new("BillboardGui")
         gui.Name = "SimpleESP"
         gui.Size = UDim2.new(0, 200, 0, 90)
-        gui.StudsOffset = Vector3.new(0, 4, 0)      -- ✅ подняли над головой
-        gui.AlwaysOnTop = false                      -- ✅ ФИКС: не перекрывает частицы
-        gui.LightInfluence = 0                       -- ✅ ФИКС: не темнеет в тени
+        gui.StudsOffset = Vector3.new(0, 4, 0)
+        gui.AlwaysOnTop = true         -- ✅ ВЕРНУЛ: поверх всего
+        gui.LightInfluence = 0
         gui.ResetOnSpawn = false
-        gui.Adornee = root                           -- ✅ ФИКС: root вместо head
+        gui.Adornee = root
         gui.MaxDistance = ESP.Range
         gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
         
@@ -531,7 +644,7 @@ local function Flunium_Boot()
         if espAcc >= ESP.UpdateRate then espAcc = 0; updateESP() end
     end)
 
-    -- UNIFIED HOOK
+    -- ══════════ UNIFIED HOOK ══════════
 
     local savedEnemyPos = nil
     local function getPriorityEnemy()
@@ -583,6 +696,7 @@ local function Flunium_Boot()
 
     local unifiedHook = false
     local oldNamecall = nil
+    local oldNewIndex = nil
     local metaT = nil
 
     local function enableUnifiedHook()
@@ -590,7 +704,9 @@ local function Flunium_Boot()
         local ok, err = pcall(function()
             metaT = getrawmetatable(game)
             oldNamecall = metaT.__namecall
+            oldNewIndex = metaT.__newindex
             setreadonly(metaT, false)
+            
             metaT.__namecall = newcclosure(function(self, ...)
                 local method = getnamecallmethod()
                 local args = {...}
@@ -615,9 +731,23 @@ local function Flunium_Boot()
                 end
                 return oldNamecall(self, table.unpack(args))
             end)
+            
+            metaT.__newindex = newcclosure(function(self, key, value)
+                if perf.blockNewEffects and (key == "Enabled" or key == "Brightness" or key == "Range") then
+                    local ok2, cls = pcall(function() return self.ClassName end)
+                    if ok2 and cls then
+                        if cls == "ParticleEmitter" or cls == "Beam" or cls == "Trail"
+                           or cls == "PointLight" or cls == "SpotLight" or cls == "SurfaceLight" then
+                            if value == true then return end
+                        end
+                    end
+                end
+                return oldNewIndex(self, key, value)
+            end)
+            
             setreadonly(metaT, true)
             unifiedHook = true
-            print("✅ Unified Hook установлен")
+            print("✅ Unified Hook установлен (__namecall + __newindex)")
         end)
         if not ok then warn("❌ Unified Hook: " .. tostring(err)) end
     end
@@ -626,6 +756,7 @@ local function Flunium_Boot()
             pcall(function()
                 setreadonly(metaT, false)
                 metaT.__namecall = oldNamecall
+                if oldNewIndex then metaT.__newindex = oldNewIndex end
                 setreadonly(metaT, true)
             end)
         end
@@ -677,7 +808,7 @@ local function Flunium_Boot()
         end
     end)
 
-    -- AIMBOTS
+    -- ══════════ AIMBOTS ══════════
 
     local function getBestAimPart(char, customPart)
         if not char then return nil end
@@ -811,7 +942,7 @@ local function Flunium_Boot()
         Camera.CFrame = cur:Lerp(CFrame.new(cur.Position, pos), math.clamp(1 - settings.aim2Smoothing, 0.05, 1))
     end
 
-    -- SERVER
+    -- ══════════ SERVER ══════════
 
     local function serverHop()
         Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск...", Duration = 3})
@@ -867,10 +998,10 @@ local function Flunium_Boot()
         pcall(function() TeleportService:TeleportToPlaceInstance(last.place or game.PlaceId, last.id, LocalPlayer) end)
     end
 
-    -- GUI
+    -- ══════════ GUI ══════════
 
     local Window = Fluent:CreateWindow({
-        Title = "Flunium Client v1.6",
+        Title = "Flunium Client v1.8",
         SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
         TabWidth = 160,
         Size = UDim2.fromOffset(600, 520),
@@ -1130,29 +1261,44 @@ local function Flunium_Boot()
 
     Tabs.Performance:AddParagraph({
         Title = "⚡ Performance Tools",
-        Content = "Low Detail Mode — убирает текстуры, тени и частицы. FPS Unlocker — снимает лимит кадров."
+        Content = "Low Detail Mode — убирает текстуры, тени, частицы, свет. FPS Unlocker — снимает лимит кадров."
     })
     Tabs.Performance:AddToggle("LowDetail", {Title = "Low Detail Mode",
-        Description = "Отключает текстуры, decals, частицы, тени, воду, post-processing",
+        Description = "Отключает текстуры, decals, частицы, тени, воду, свет, post-processing",
         Default = false
     }):OnChanged(function(v)
         perf.lowDetail = v
         if v then
             setRemoveTextures(true); setRemoveDecals(true); setRemoveParticles(true)
             setRemoveShadows(true); setDisablePostFx(true); setOptimizeWater(true)
+            setRemoveLights(true); setRemoveBeams(true); setRemoveHighlights(true)
+            setHideAccessories(true); setRemoveCharFx(true)
         else
             setRemoveTextures(false); setRemoveDecals(false); setRemoveParticles(false)
             setRemoveShadows(false); setDisablePostFx(false); setOptimizeWater(false)
+            setRemoveLights(false); setRemoveBeams(false); setRemoveHighlights(false)
+            setHideAccessories(false); setRemoveCharFx(false)
+            perf.cachedProps = {}
+            perf.cachedLight = {}
         end
     end)
     Tabs.Performance:AddToggle("RemoveTextures", {Title = "Remove Textures", Default = false}):OnChanged(setRemoveTextures)
     Tabs.Performance:AddToggle("RemoveDecals", {Title = "Remove Decals", Default = false}):OnChanged(setRemoveDecals)
-    Tabs.Performance:AddToggle("RemoveParticles", {Title = "Remove Particles", Default = false}):OnChanged(setRemoveParticles)
+    Tabs.Performance:AddToggle("RemoveParticles", {Title = "Remove Particles (TimeScale)", Default = false}):OnChanged(setRemoveParticles)
     Tabs.Performance:AddToggle("RemoveShadows", {Title = "Remove Shadows", Default = false}):OnChanged(setRemoveShadows)
     Tabs.Performance:AddToggle("ForcePlastic", {Title = "Force Plastic Material", Default = false}):OnChanged(setForcePlastic)
     Tabs.Performance:AddToggle("DisablePost", {Title = "Disable Post-Processing", Default = false}):OnChanged(setDisablePostFx)
     Tabs.Performance:AddToggle("ExtendFog", {Title = "Extend Fog Distance", Default = false}):OnChanged(setExtendFog)
     Tabs.Performance:AddToggle("OptimizeWater", {Title = "Optimize Water", Default = false}):OnChanged(setOptimizeWater)
+    Tabs.Performance:AddToggle("RemoveLights", {Title = "Remove Lights (aura/glow)", Default = false}):OnChanged(setRemoveLights)
+    Tabs.Performance:AddToggle("RemoveBeams", {Title = "Remove Beams & Trails", Default = false}):OnChanged(setRemoveBeams)
+    Tabs.Performance:AddToggle("RemoveHighlights", {Title = "Remove Highlights", Default = false}):OnChanged(setRemoveHighlights)
+    Tabs.Performance:AddToggle("HideAccessories", {Title = "Hide Accessories (hair/clothes)", Default = false}):OnChanged(setHideAccessories)
+    Tabs.Performance:AddToggle("RemoveCharFx", {Title = "Remove Character Effects", Default = false}):OnChanged(setRemoveCharFx)
+    Tabs.Performance:AddToggle("BlockNewFx", {Title = "Block New Effects (__newindex hook)", Default = false}):OnChanged(function(v)
+        perf.blockNewEffects = v
+        if v and not unifiedHook then enableUnifiedHook() end
+    end)
 
     Tabs.Performance:AddSection("FPS Unlocker")
     Tabs.Performance:AddToggle("FpsUnlock", {Title = "🔓 Unlock FPS Cap",
@@ -1626,11 +1772,11 @@ local function Flunium_Boot()
     end)
 
     print("====================================")
-    print("✅ Flunium Client v1.6 загружен!")
-    print("👁️ ESP фикс: AlwaysOnTop=false, Adornee=Root, LightInfluence=0")
+    print("✅ Flunium Client v1.8 загружен!")
+    print("👁️ ESP: AlwaysOnTop=true, Adornee=Root, LightInfluence=0")
+    print("⚡ Particles: TimeScale=0 (не ломает управление игрой)")
     print("🎯 Aimbot 1 + Aimbot 2 + Silent Aim")
-    print("⚡ Performance tab + FPS Unlocker")
-    print("🌐 Server tab: Job ID, History, IP, Region")
+    print("🌐 Server tab + Performance tab")
     print("💾 Keybinds сохраняются в конфиг")
     print("📌 RightControl - скрыть меню")
     print("====================================")
