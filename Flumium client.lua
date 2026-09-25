@@ -1,10 +1,11 @@
 --[[
-    Flunium Client v1.9
-    ✅ LDM больше не включает подтумблеры
-    ✅ Remove Character Effects: полное удаление эффектов через Clear() + Heartbeat
-    ✅ Particles: TimeScale=0 + Clear() + cleanup
-    ✅ ESP AlwaysOnTop = true
-    ✅ Autoexec fix + self-heal + Fluent cache
+    Flunium Client v2.0
+    ✅ Aimbot 2 → Kunai Mark Aimbot (Kunai Marker удалён)
+    ✅ Silent Aim Kunai Mark — Head + HeightOffset через fixmouse
+    ✅ Max Distance: 0 или 5000 = без лимита
+    ✅ FOV Circle toggle в каждом аиме
+    ✅ Visual вкладка → Performance, отдельная удалена
+    ✅ Performance оптимизирован (DescendantAdded вместо Heartbeat)
     ✅ Keybinds сохранение
 ]]
 
@@ -12,7 +13,7 @@ local function Flunium_Boot()
 
     local existingFluent = getgenv().FluniumFluent
     local existingLoaded = getgenv().FluniumLoaded
-    
+
     if existingLoaded and existingFluent then
         local alive = false
         pcall(function()
@@ -30,7 +31,7 @@ local function Flunium_Boot()
         end)
         if alive then
             pcall(function()
-                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v1.9 уже запущен!", Duration = 3})
+                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v2.0 уже запущен!", Duration = 3})
             end)
             return
         else
@@ -39,7 +40,7 @@ local function Flunium_Boot()
             getgenv().FluniumFluent = nil
         end
     end
-    
+
     pcall(function()
         local pg = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
         if pg then
@@ -48,11 +49,11 @@ local function Flunium_Boot()
             end
         end
     end)
-    
+
     local Fluent
     local fluentUrl = "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
     local fluentCache = "FluniumFluent.lua"
-    
+
     local ok, err = pcall(function()
         if isfile and isfile(fluentCache) then
             local cached = readfile(fluentCache)
@@ -65,14 +66,14 @@ local function Flunium_Boot()
         if writefile then pcall(function() writefile(fluentCache, src) end) end
         Fluent = loadstring(src)()
     end)
-    
+
     if not ok or not Fluent then
         warn("❌ Flunium: не удалось загрузить Fluent — " .. tostring(err))
         getgenv().FluniumLoaded = nil
         getgenv().FluniumFluent = nil
         return
     end
-    
+
     getgenv().FluniumFluent = Fluent
 
     local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
@@ -93,6 +94,7 @@ local function Flunium_Boot()
     local shindoEvent
     pcall(function() shindoEvent = LocalPlayer:WaitForChild("startevent", 8) end)
 
+    -- ══════════ CONFIG ══════════
     local settings = {
         fov = 300, smoothing = 0.15, prediction = 0.065,
         wallCheck = false, teamCheck = false,
@@ -103,15 +105,17 @@ local function Flunium_Boot()
         fovColor = Color3.fromRGB(255, 0, 0),
         targetedColor = Color3.fromRGB(0, 255, 0),
         rainbowFov = false,
+        -- Kunai Mark Aimbot (бывший Aimbot 2)
         aim2Fov = 300, aim2Smoothing = 0.15, aim2Prediction = 0.065,
         aim2WallCheck = false, aim2TeamCheck = false,
         aim2Mode = "Hold", aim2Key = Enum.KeyCode.One,
         aim2ListeningForBind = false, aim2ShowFovCircle = true,
         aim2MaxDistance = 0, aim2PrioritizeClose = true, aim2Mode360 = false,
-        aim2HeightOffset = 3,
+        aim2HeightOffset = 16,
         aim2FovColor = Color3.fromRGB(255, 165, 0),
         aim2TargetedColor = Color3.fromRGB(255, 255, 0),
         aim2RainbowFov = false,
+        -- Visual (перенесено)
         xray = false, fullBright = false, nightVision = false,
         noShadows = false, noBloom = false, noSunRays = false,
         rainbowLighting = false, noFog = false
@@ -126,9 +130,15 @@ local function Flunium_Boot()
         CachedTarget = nil, CachedCFrame = nil, Logging = false
     }
 
-    local markerClick = {
-        Enabled = false, ModifierKey = Enum.KeyCode.Backquote,
-        ListeningForBind = false, Debug = false, HeightOffset = 3
+    -- Silent Aim Kunai Mark
+    local silentKunai = {
+        Enabled = false, MasterEnabled = false, Mode = "Hold",
+        HoldKey = Enum.KeyCode.Two, ListeningForBind = false,
+        Prediction = 0.187, FOV = 500,
+        ShowFovCircle = true, MaxDistance = 0, PrioritizeClose = true,
+        Mode360 = false, FovColor = Color3.fromRGB(255, 0, 255),
+        HeightOffset = 16,
+        CachedTarget = nil, CachedCFrame = nil
     }
 
     local ESP = {
@@ -179,7 +189,8 @@ local function Flunium_Boot()
         "LeftHand", "RightHand", "LeftFoot", "RightFoot"
     }
 
-    local fovCircle, fovCircle2, silentFovCircle
+    -- FOV circles
+    local fovCircle, fovCircle2, silentFovCircle, silentKunaiFovCircle
     pcall(function()
         fovCircle = Drawing.new("Circle")
         fovCircle.Thickness = 2; fovCircle.Radius = settings.fov
@@ -198,47 +209,151 @@ local function Flunium_Boot()
         silentFovCircle.Filled = false; silentFovCircle.Color = silentAim.FovColor
         silentFovCircle.Transparency = 1; silentFovCircle.Visible = false
     end)
+    pcall(function()
+        silentKunaiFovCircle = Drawing.new("Circle")
+        silentKunaiFovCircle.Thickness = 2; silentKunaiFovCircle.Radius = silentKunai.FOV
+        silentKunaiFovCircle.Filled = false; silentKunaiFovCircle.Color = silentKunai.FovColor
+        silentKunaiFovCircle.Transparency = 1; silentKunaiFovCircle.Visible = false
+    end)
+
+    -- ══════════ MAX DISTANCE HELPER ══════════
+    local function checkMaxDistance(dist, maxDist)
+        if not maxDist or maxDist <= 0 or maxDist >= 5000 then return true end
+        return dist <= maxDist
+    end
 
     -- ══════════ PERFORMANCE ══════════
+    local perfConnections = {}
 
-    local function applyLowDetail()
-        pcall(function()
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("BasePart") and not perf.cachedProps[obj] then
-                    perf.cachedProps[obj] = {Material = obj.Material, Reflectance = obj.Reflectance}
+    local function disconnectPerfConns()
+        for _, c in ipairs(perfConnections) do pcall(function() c:Disconnect() end) end
+        perfConnections = {}
+    end
+
+    local function applyRemoveParticles(v)
+        perf.removeParticles = v
+        if v then
+            local function handleParticle(obj)
+                if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                    if not obj:GetAttribute("FluniumTimeScale") then
+                        obj:SetAttribute("FluniumTimeScale", obj.TimeScale)
+                    end
+                    obj.TimeScale = 0
+                    pcall(function() obj:Clear() end)
                 end
             end
-            for obj, data in pairs(perf.cachedProps) do
-                if obj and obj.Parent then
-                    if (perf.removeTextures or perf.lowDetail) and obj:IsA("BasePart") then
-                        obj.Material = Enum.Material.SmoothPlastic
+            for _, obj in ipairs(Workspace:GetDescendants()) do handleParticle(obj) end
+            table.insert(perfConnections, Workspace.DescendantAdded:Connect(handleParticle))
+        else
+            disconnectPerfConns()
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                    local ts = obj:GetAttribute("FluniumTimeScale")
+                    if ts ~= nil then
+                        obj.TimeScale = ts
+                        obj:SetAttribute("FluniumTimeScale", nil)
                     end
-                    if perf.forcePlastic and obj:IsA("BasePart") then
-                        obj.Material = Enum.Material.Plastic
-                        obj.Reflectance = 0
-                    end
+                end
+            end
+        end
+    end
+
+    local function killCharFx(char)
+        pcall(function()
+            for _, obj in ipairs(char:GetDescendants()) do
+                if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                    pcall(function() obj:Clear() end)
+                    pcall(function() obj.Enabled = false end)
+                elseif obj:IsA("Beam") or obj:IsA("Trail") then
+                    pcall(function() obj.Enabled = false end)
+                elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+                    pcall(function() obj.Enabled = false end)
+                elseif obj:IsA("Highlight") then
+                    pcall(function() obj.Enabled = false end)
                 end
             end
         end)
     end
 
-    local function restoreLowDetail()
-        pcall(function()
+    local function applyRemoveCharFx(v)
+        perf.removeCharFx = v
+        if v then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                local char = plr.Character
+                if char then killCharFx(char) end
+            end
+            table.insert(perfConnections, Workspace.DescendantAdded:Connect(function(obj)
+                if not perf.removeCharFx then return end
+                local char = obj:FindFirstAncestorOfClass("Model")
+                if char and Players:GetPlayerFromCharacter(char) then
+                    killCharFx(char)
+                end
+            end))
+        else
+            disconnectPerfConns()
+        end
+    end
+
+    local function applyLowDetail(v)
+        perf.lowDetail = v
+        if v then
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    if not perf.cachedProps[obj] then
+                        perf.cachedProps[obj] = {Material = obj.Material, Reflectance = obj.Reflectance}
+                    end
+                    obj.Material = Enum.Material.SmoothPlastic
+                end
+            end
+            table.insert(perfConnections, Workspace.DescendantAdded:Connect(function(obj)
+                if not perf.lowDetail then return end
+                if obj:IsA("BasePart") then
+                    if not perf.cachedProps[obj] then
+                        perf.cachedProps[obj] = {Material = obj.Material, Reflectance = obj.Reflectance}
+                    end
+                    obj.Material = Enum.Material.SmoothPlastic
+                end
+            end))
+        else
+            disconnectPerfConns()
             for obj, data in pairs(perf.cachedProps) do
-                if obj and obj.Parent then
+                if obj and obj.Parent and obj:IsA("BasePart") then
                     pcall(function()
-                        if obj:IsA("BasePart") then
-                            obj.Material = data.Material
-                            obj.Reflectance = data.Reflectance
-                        end
+                        obj.Material = data.Material
+                        obj.Reflectance = data.Reflectance
                     end)
                 end
             end
             perf.cachedProps = {}
-        end)
+        end
     end
 
-    local function setRemoveTextures(v)
+    local function applyForcePlastic(v)
+        perf.forcePlastic = v
+        if v then
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    if not perf.cachedProps[obj] then
+                        perf.cachedProps[obj] = {Material = obj.Material, Reflectance = obj.Reflectance}
+                    end
+                    obj.Material = Enum.Material.Plastic
+                    obj.Reflectance = 0
+                end
+            end
+        else
+            for obj, data in pairs(perf.cachedProps) do
+                if obj and obj.Parent and obj:IsA("BasePart") then
+                    pcall(function()
+                        obj.Material = data.Material
+                        obj.Reflectance = data.Reflectance
+                    end)
+                end
+            end
+            perf.cachedProps = {}
+        end
+    end
+
+    local function applyRemoveTextures(v)
         perf.removeTextures = v
         pcall(function()
             for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -247,7 +362,7 @@ local function Flunium_Boot()
         end)
     end
 
-    local function setRemoveDecals(v)
+    local function applyRemoveDecals(v)
         perf.removeDecals = v
         pcall(function()
             for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -256,69 +371,12 @@ local function Flunium_Boot()
         end)
     end
 
-    -- ✅ Particles: TimeScale=0 + Clear() + Heartbeat cleanup
-    local particleCleanupConn = nil
-
-    local function startParticleCleanup()
-        if particleCleanupConn then return end
-        particleCleanupConn = RunService.Heartbeat:Connect(function()
-            if not (perf.removeParticles or perf.lowDetail) then return end
-            pcall(function()
-                for _, obj in ipairs(Workspace:GetDescendants()) do
-                    if obj:IsA("ParticleEmitter") then
-                        if obj.TimeScale == 0 then
-                            pcall(function() obj:Clear() end)
-                        end
-                    end
-                end
-            end)
-        end)
-    end
-
-    local function stopParticleCleanup()
-        if particleCleanupConn then
-            particleCleanupConn:Disconnect()
-            particleCleanupConn = nil
-        end
-    end
-
-    local function setRemoveParticles(v)
-        perf.removeParticles = v
-        pcall(function()
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-                    if v then
-                        if not obj:GetAttribute("FluniumTimeScale") then
-                            obj:SetAttribute("FluniumTimeScale", obj.TimeScale)
-                        end
-                        obj.TimeScale = 0
-                        pcall(function() obj:Clear() end)
-                    else
-                        local ts = obj:GetAttribute("FluniumTimeScale")
-                        if ts ~= nil then
-                            obj.TimeScale = ts
-                            obj:SetAttribute("FluniumTimeScale", nil)
-                        end
-                    end
-                end
-            end
-        end)
-        if v then startParticleCleanup() else
-            if not perf.removeCharFx then stopParticleCleanup() end
-        end
-    end
-
-    local function setRemoveShadows(v)
+    local function applyRemoveShadows(v)
         perf.removeShadows = v
         Lighting.GlobalShadows = not v
     end
 
-    local function setForcePlastic(v)
-        perf.forcePlastic = v
-        if v then applyLowDetail() else restoreLowDetail() end
-    end
-
-    local function setDisablePostFx(v)
+    local function applyDisablePostFx(v)
         perf.disablePostFx = v
         pcall(function()
             for _, e in ipairs(Lighting:GetChildren()) do
@@ -331,13 +389,13 @@ local function Flunium_Boot()
         end)
     end
 
-    local function setExtendFog(v)
+    local function applyExtendFog(v)
         perf.extendFog = v
         if v then Lighting.FogEnd = 100000; Lighting.FogStart = 100000
         else Lighting.FogEnd = perf.cachedFog.FogEnd; Lighting.FogStart = perf.cachedFog.FogStart end
     end
 
-    local function setOptimizeWater(v)
+    local function applyOptimizeWater(v)
         perf.optimizeWater = v
         pcall(function()
             for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -350,7 +408,7 @@ local function Flunium_Boot()
         end)
     end
 
-    local function setRemoveLights(v)
+    local function applyRemoveLights(v)
         perf.removeLights = v
         pcall(function()
             for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -371,7 +429,7 @@ local function Flunium_Boot()
         end)
     end
 
-    local function setRemoveBeams(v)
+    local function applyRemoveBeams(v)
         perf.removeBeams = v
         pcall(function()
             for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -382,7 +440,7 @@ local function Flunium_Boot()
         end)
     end
 
-    local function setRemoveHighlights(v)
+    local function applyRemoveHighlights(v)
         perf.removeHighlights = v
         pcall(function()
             for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -394,7 +452,7 @@ local function Flunium_Boot()
         end)
     end
 
-    local function setHideAccessories(v)
+    local function applyHideAccessories(v)
         perf.hideAccessories = v
         pcall(function()
             for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -409,64 +467,7 @@ local function Flunium_Boot()
         end)
     end
 
-    -- ✅ Remove Character Effects: полное удаление, а не остановка
-    local charFxCleanupConn = nil
-
-    local function killCharFx(char)
-        pcall(function()
-            for _, obj in ipairs(char:GetDescendants()) do
-                if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-                    pcall(function() obj:Clear() end)
-                    pcall(function() obj.Enabled = false end)
-                elseif obj:IsA("Beam") or obj:IsA("Trail") then
-                    pcall(function() obj.Enabled = false end)
-                elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
-                    pcall(function() obj.Enabled = false end)
-                elseif obj:IsA("Highlight") then
-                    pcall(function() obj.Enabled = false end)
-                end
-            end
-        end)
-    end
-
-    local function startCharFxCleanup()
-        if charFxCleanupConn then return end
-        charFxCleanupConn = RunService.Heartbeat:Connect(function()
-            if not perf.removeCharFx then return end
-            pcall(function()
-                for _, plr in ipairs(Players:GetPlayers()) do
-                    local char = plr.Character
-                    if char then killCharFx(char) end
-                end
-            end)
-        end)
-    end
-
-    local function stopCharFxCleanup()
-        if charFxCleanupConn then
-            charFxCleanupConn:Disconnect()
-            charFxCleanupConn = nil
-        end
-    end
-
-    local function setRemoveCharFx(v)
-        perf.removeCharFx = v
-        if v then
-            pcall(function()
-                for _, plr in ipairs(Players:GetPlayers()) do
-                    local char = plr.Character
-                    if char then killCharFx(char) end
-                end
-            end)
-            startCharFxCleanup()
-            startParticleCleanup()
-        else
-            stopCharFxCleanup()
-            if not perf.removeParticles then stopParticleCleanup() end
-        end
-    end
-
-    local function setFpsUnlock(v)
+    local function applyFpsUnlock(v)
         perf.fpsUnlock = v
         if v then
             pcall(function() setfpscap(perf.fpsCap) end)
@@ -476,53 +477,82 @@ local function Flunium_Boot()
         end
     end
 
-    -- HISTORY
-
-    local lastJobHistory = {}
-    local historyFile = "FluniumHistory.json"
-
-    local function loadHistory()
+    -- ══════════ VISUAL (перенесено в Performance) ══════════
+    local function applyXRay(v)
+        settings.xray = v
         pcall(function()
-            if isfile and isfile(historyFile) then
-                local data = HttpService:JSONDecode(readfile(historyFile))
-                if type(data) == "table" then lastJobHistory = data end
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    if v then
+                        if not obj:GetAttribute("OT") then obj:SetAttribute("OT", obj.Transparency) end
+                        obj.LocalTransparencyModifier = 0.5
+                    else
+                        local o = obj:GetAttribute("OT")
+                        if o then obj.LocalTransparencyModifier = o end
+                    end
+                end
             end
         end)
     end
 
-    local function saveHistory()
+    local function applyFullBright(v)
+        settings.fullBright = v
+        if v then
+            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+            Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+            Lighting.Brightness = 3; Lighting.ClockTime = 12
+        else
+            Lighting.Ambient = originalLighting.Ambient
+            Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
+            Lighting.Brightness = originalLighting.Brightness
+            Lighting.ClockTime = originalLighting.ClockTime
+        end
+    end
+
+    local function applyNightVision(v)
+        settings.nightVision = v
         pcall(function()
-            if writefile then writefile(historyFile, HttpService:JSONEncode(lastJobHistory)) end
+            local nv = Lighting:FindFirstChild("NVEffect")
+            if v then
+                if not nv then
+                    nv = Instance.new("ColorCorrectionEffect")
+                    nv.Name = "NVEffect"; nv.Brightness = 0.3; nv.Contrast = 0.5
+                    nv.Saturation = -0.5; nv.TintColor = Color3.fromRGB(0, 255, 0)
+                    nv.Parent = Lighting
+                end
+                nv.Enabled = true
+            elseif nv then nv.Enabled = false end
         end)
     end
 
-    local function addJobToHistory(jobId, placeId)
-        table.insert(lastJobHistory, 1, {id = jobId, place = placeId, time = os.time()})
-        while #lastJobHistory > 10 do table.remove(lastJobHistory) end
-        saveHistory()
-    end
+    local function applyNoShadows(v) Lighting.GlobalShadows = not v end
 
-    loadHistory()
-
-    local function getPlayerPing()
-        local ok, ping = pcall(function() return LocalPlayer:GetNetworkPing() end)
-        return ok and ping and math.floor(ping * 1000) or 0
-    end
-
-    local function getServerRegion()
-        local ok, region = pcall(function()
-            return LocalizationService:GetCountryRegionForPlayerAsync(Players:GetPlayers()[1] or LocalPlayer)
+    local function applyNoBloom(v)
+        pcall(function()
+            for _, e in ipairs(Lighting:GetChildren()) do
+                if e:IsA("BloomEffect") then e.Enabled = not v end
+            end
         end)
-        return ok and region and tostring(region) or "Unknown"
     end
 
-    local function getServerIP()
-        local ok, ip = pcall(function() return game:HttpGet("https://api.ipify.org") end)
-        return ok and ip or "Unknown"
+    local function applyNoSunRays(v)
+        pcall(function()
+            for _, e in ipairs(Lighting:GetChildren()) do
+                if e:IsA("SunRaysEffect") then e.Enabled = not v end
+            end
+        end)
+    end
+
+    local function applyNoFog(v)
+        if v then
+            Lighting.FogEnd = 100000; Lighting.FogStart = 100000
+        else
+            Lighting.FogEnd = originalLighting.FogEnd
+            Lighting.FogStart = originalLighting.FogStart
+        end
     end
 
     -- ══════════ ESP ══════════
-
     local espData, espConns, espAcc = {}, {}, 0
     local function getRoot(char)
         return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"))
@@ -591,11 +621,11 @@ local function Flunium_Boot()
     local function createPlayerESP(p, char)
         if p == LocalPlayer or not isWhitelisted(p) then return end
         if espData[p] and espData[p].gui and espData[p].gui.Parent then return end
-        
+
         local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head") or getRoot(char)
         local hum = getHumanoid(char)
         if not root or not hum then return end
-        
+
         local gui = Instance.new("BillboardGui")
         gui.Name = "SimpleESP"
         gui.Size = UDim2.new(0, 200, 0, 90)
@@ -606,17 +636,17 @@ local function Flunium_Boot()
         gui.Adornee = root
         gui.MaxDistance = ESP.Range
         gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-        
+
         local holder = Instance.new("Frame", gui)
         holder.Size = UDim2.fromScale(1, 1); holder.BackgroundTransparency = 1
         Instance.new("UIScale", holder).Scale = ESP.Size
-        
+
         local nameLabel = makeLabel(holder, UDim2.new(1, 0, 0, 20), UDim2.new(0, 0, 0, 0), ESP.NameColor, 16)
         nameLabel.Text = p.Name
         local hpLabel = makeLabel(holder, UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 22), ESP.HPColor, 16)
         local mdLabel = makeLabel(holder, UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 42), ESP.MDColor, 16)
         local dodgeLabel = makeLabel(holder, UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 62), ESP.DodgeOnColor, 16)
-        
+
         espData[p] = {gui=gui, char=char, root=root, hum=hum, nameLabel=nameLabel,
             hpLabel=hpLabel, mdLabel=mdLabel, dodgeLabel=dodgeLabel, hp=-1, md=-1, dodgeState=-1}
     end
@@ -694,7 +724,6 @@ local function Flunium_Boot()
     end)
 
     -- ══════════ UNIFIED HOOK ══════════
-
     local savedEnemyPos = nil
     local function getPriorityEnemy()
         local myChar = LocalPlayer.Character
@@ -713,8 +742,8 @@ local function Flunium_Boot()
             local root = char:FindFirstChild("HumanoidRootPart")
             local head = char:FindFirstChild("Head")
             local aimPos
-            if head then aimPos = head.Position + Vector3.new(0, markerClick.HeightOffset, 0)
-            elseif root then aimPos = root.Position + Vector3.new(0, markerClick.HeightOffset + 2, 0)
+            if head then aimPos = head.Position + Vector3.new(0, 0, 0)
+            elseif root then aimPos = root.Position + Vector3.new(0, 2, 0)
             else continue end
             local worldDist = (root and root.Position or aimPos - myPos).Magnitude
             local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
@@ -738,10 +767,6 @@ local function Flunium_Boot()
         end
         return t
     end
-    local function isModifierHeld()
-        if not markerClick.Enabled then return false end
-        return UserInputService:IsKeyDown(markerClick.ModifierKey)
-    end
 
     local unifiedHook = false
     local oldNamecall = nil
@@ -755,32 +780,26 @@ local function Flunium_Boot()
             oldNamecall = metaT.__namecall
             oldNewIndex = metaT.__newindex
             setreadonly(metaT, false)
-            
+
             metaT.__namecall = newcclosure(function(self, ...)
                 local method = getnamecallmethod()
                 local args = {...}
-                local nameLower = string.lower(tostring(self.Name))
-                local isMarker = nameLower:find("marker", 1, true) or nameLower:find("kunai", 1, true) or nameLower:find("namikaze", 1, true)
-                local isTeleport = nameLower:find("teleport", 1, true)
-                if method == "FireServer" and (isMarker or isTeleport) and isModifierHeld() then
-                    local enemyPos = getPriorityEnemy()
-                    if enemyPos then
-                        savedEnemyPos = enemyPos
-                        for i = 1, #args do
-                            if typeof(args[i]) == "Vector3" then args[i] = enemyPos
-                            elseif typeof(args[i]) == "CFrame" then args[i] = CFrame.new(enemyPos)
-                            elseif type(args[i]) == "table" then args[i] = replaceVectorInTable(args[i], enemyPos, 0) end
+
+                if method == "FireServer" and self.Name == "update" then
+                    if args[1] == "fixmouse" then
+                        -- silent aim kunai mark: Head + HeightOffset
+                        if silentKunai.Enabled and silentKunai.CachedCFrame then
+                            args[2] = silentKunai.CachedCFrame
+                        -- обычный silent aim
+                        elseif silentAim.Enabled and silentAim.CachedCFrame then
+                            args[2] = silentAim.CachedCFrame
                         end
                     end
                 end
-                if method == "FireServer" and self.Name == "update" then
-                    if args[1] == "fixmouse" and silentAim.Enabled and silentAim.CachedCFrame then
-                        args[2] = silentAim.CachedCFrame
-                    end
-                end
+
                 return oldNamecall(self, table.unpack(args))
             end)
-            
+
             metaT.__newindex = newcclosure(function(self, key, value)
                 if perf.blockNewEffects and (key == "Enabled" or key == "Brightness" or key == "Range") then
                     local ok2, cls = pcall(function() return self.ClassName end)
@@ -793,13 +812,14 @@ local function Flunium_Boot()
                 end
                 return oldNewIndex(self, key, value)
             end)
-            
+
             setreadonly(metaT, true)
             unifiedHook = true
-            print("✅ Unified Hook установлен (__namecall + __newindex)")
+            print("✅ Unified Hook установлен")
         end)
         if not ok then warn("❌ Unified Hook: " .. tostring(err)) end
     end
+
     local function disableUnifiedHook()
         if metaT and oldNamecall then
             pcall(function()
@@ -812,53 +832,99 @@ local function Flunium_Boot()
         unifiedHook = false
     end
 
+    -- ══════════ SILENT AIM + SILENT KUNAI ══════════
     RunService.Heartbeat:Connect(function()
         if silentAim.MasterEnabled and silentAim.Mode == "Hold" then
             silentAim.Enabled = UserInputService:IsKeyDown(silentAim.HoldKey)
         end
-        if not silentAim.Enabled then
-            silentAim.CachedTarget = nil; silentAim.CachedCFrame = nil; return
+        if silentKunai.MasterEnabled and silentKunai.Mode == "Hold" then
+            silentKunai.Enabled = UserInputService:IsKeyDown(silentKunai.HoldKey)
         end
-        local best, bestScore = nil, math.huge
-        local cam = Workspace.CurrentCamera
-        local MousePos = cam.ViewportSize / 2
-        local myChar = LocalPlayer.Character
-        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        local originPos = myRoot and myRoot.Position or cam.CFrame.Position
-        for _, p in pairs(Players:GetPlayers()) do
-            if p == LocalPlayer then continue end
-            local char = p.Character
-            if not char then continue end
-            local part = char:FindFirstChild(silentAim.TargetPart)
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if not part or not hum or hum.Health <= 0 then continue end
-            local enemyRoot = char:FindFirstChild("HumanoidRootPart")
-            if silentAim.MaxDistance and silentAim.MaxDistance > 0 and enemyRoot then
-                if (enemyRoot.Position - originPos).Magnitude > silentAim.MaxDistance then continue end
+
+        -- SILENT AIM (обычный)
+        if silentAim.Enabled then
+            local best, bestScore = nil, math.huge
+            local cam = Workspace.CurrentCamera
+            local MousePos = cam.ViewportSize / 2
+            local myChar = LocalPlayer.Character
+            local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+            local originPos = myRoot and myRoot.Position or cam.CFrame.Position
+            for _, p in pairs(Players:GetPlayers()) do
+                if p == LocalPlayer then continue end
+                local char = p.Character
+                if not char then continue end
+                local part = char:FindFirstChild(silentAim.TargetPart)
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if not part or not hum or hum.Health <= 0 then continue end
+                local enemyRoot = char:FindFirstChild("HumanoidRootPart")
+                if enemyRoot and not checkMaxDistance((enemyRoot.Position - originPos).Magnitude, silentAim.MaxDistance) then continue end
+                if silentAim.Mode360 then
+                    local worldDist = (part.Position - originPos).Magnitude
+                    if worldDist < bestScore then bestScore = worldDist; best = part end
+                else
+                    local pos, vis = cam:WorldToViewportPoint(part.Position)
+                    if not vis then continue end
+                    local screenDist = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
+                    if screenDist > silentAim.FOV then continue end
+                    local worldDist = (part.Position - originPos).Magnitude
+                    local score = silentAim.PrioritizeClose and worldDist or screenDist
+                    if score < bestScore then bestScore = score; best = part end
+                end
             end
-            if silentAim.Mode360 then
-                local worldDist = (part.Position - originPos).Magnitude
-                if worldDist < bestScore then bestScore = worldDist; best = part end
-            else
-                local pos, vis = cam:WorldToViewportPoint(part.Position)
-                if not vis then continue end
-                local screenDist = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
-                if screenDist > silentAim.FOV then continue end
-                local worldDist = (part.Position - originPos).Magnitude
-                local score = silentAim.PrioritizeClose and worldDist or screenDist
-                if score < bestScore then bestScore = score; best = part end
+            silentAim.CachedTarget = best
+            if silentAim.CachedTarget and silentAim.CachedTarget.Parent then
+                local targetPos = silentAim.CachedTarget.Position + (silentAim.CachedTarget.Velocity * silentAim.Prediction)
+                local camPos2 = cam.CFrame.Position
+                silentAim.CachedCFrame = CFrame.new(targetPos, targetPos + (targetPos - camPos2).Unit)
             end
+        else
+            silentAim.CachedTarget = nil; silentAim.CachedCFrame = nil
         end
-        silentAim.CachedTarget = best
-        if silentAim.CachedTarget and silentAim.CachedTarget.Parent then
-            local targetPos = silentAim.CachedTarget.Position + (silentAim.CachedTarget.Velocity * silentAim.Prediction)
-            local camPos2 = cam.CFrame.Position
-            silentAim.CachedCFrame = CFrame.new(targetPos, targetPos + (targetPos - camPos2).Unit)
+
+        -- SILENT AIM KUNAI MARK (Head + HeightOffset)
+        if silentKunai.Enabled then
+            local best, bestScore = nil, math.huge
+            local cam = Workspace.CurrentCamera
+            local MousePos = cam.ViewportSize / 2
+            local myChar = LocalPlayer.Character
+            local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+            local originPos = myRoot and myRoot.Position or cam.CFrame.Position
+            for _, p in pairs(Players:GetPlayers()) do
+                if p == LocalPlayer then continue end
+                local char = p.Character
+                if not char then continue end
+                local head = char:FindFirstChild("Head")
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if not head or not hum or hum.Health <= 0 then continue end
+                local aimPos = head.Position + Vector3.new(0, silentKunai.HeightOffset, 0)
+                local enemyRoot = char:FindFirstChild("HumanoidRootPart")
+                if enemyRoot and not checkMaxDistance((enemyRoot.Position - originPos).Magnitude, silentKunai.MaxDistance) then continue end
+                if silentKunai.Mode360 then
+                    local worldDist = (aimPos - originPos).Magnitude
+                    if worldDist < bestScore then bestScore = worldDist; best = {head = head, pos = aimPos} end
+                else
+                    local pos, vis = cam:WorldToViewportPoint(aimPos)
+                    if not vis then continue end
+                    local screenDist = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
+                    if screenDist > silentKunai.FOV then continue end
+                    local worldDist = (aimPos - originPos).Magnitude
+                    local score = silentKunai.PrioritizeClose and worldDist or screenDist
+                    if score < bestScore then bestScore = score; best = {head = head, pos = aimPos} end
+                end
+            end
+            silentKunai.CachedTarget = best
+            if silentKunai.CachedTarget then
+                local basePos = silentKunai.CachedTarget.pos
+                local targetPos = basePos + (silentKunai.CachedTarget.head.Velocity * silentKunai.Prediction)
+                local camPos2 = cam.CFrame.Position
+                silentKunai.CachedCFrame = CFrame.new(targetPos, targetPos + (targetPos - camPos2).Unit)
+            end
+        else
+            silentKunai.CachedTarget = nil; silentKunai.CachedCFrame = nil
         end
     end)
 
     -- ══════════ AIMBOTS ══════════
-
     local function getBestAimPart(char, customPart)
         if not char then return nil end
         if customPart and customPart ~= "Auto" then
@@ -870,33 +936,12 @@ local function Flunium_Boot()
             local p = char:FindFirstChild(n)
             if p and p:IsA("BasePart") then return p end
         end
-        local camPos = Camera.CFrame.Position
-        local best, bestD = nil, math.huge
-        for _, n in ipairs(ALL_BODY_PARTS) do
-            local p = char:FindFirstChild(n)
-            if p and p:IsA("BasePart") then
-                local d = (p.Position - camPos).Magnitude
-                if d < bestD then bestD = d; best = p end
-            end
-        end
-        return best
+        return nil
     end
     local function isSameTeam(p, check)
         if not check then return false end
         if not p.Team or not LocalPlayer.Team then return false end
         return p.Team == LocalPlayer.Team
-    end
-    local function isVisible(char, check)
-        if not check then return true end
-        local part = getBestAimPart(char, "Auto")
-        if not part then return false end
-        local origin = Camera.CFrame.Position
-        local dir = (part.Position - origin).unit * 500
-        local params = RaycastParams.new()
-        params.FilterDescendantsInstances = {LocalPlayer.Character, char}
-        params.FilterType = Enum.RaycastFilterType.Blacklist
-        local res = Workspace:Raycast(origin, dir, params)
-        return not res or res.Instance:IsDescendantOf(char)
     end
 
     local function getTarget()
@@ -914,11 +959,8 @@ local function Flunium_Boot()
             if not hum or hum.Health <= 0 then continue end
             local tp = getBestAimPart(char, settings.aimPart)
             if not tp then continue end
-            if settings.wallCheck and not isVisible(char, true) then continue end
             local enemyRoot = char:FindFirstChild("HumanoidRootPart")
-            if settings.maxDistance and settings.maxDistance > 0 and enemyRoot then
-                if (enemyRoot.Position - originPos).Magnitude > settings.maxDistance then continue end
-            end
+            if enemyRoot and not checkMaxDistance((enemyRoot.Position - originPos).Magnitude, settings.maxDistance) then continue end
             local worldDist = (tp.Position - originPos).Magnitude
             if settings.mode360 then
                 if worldDist < bestS then bestS = worldDist; bestT = p end
@@ -950,11 +992,8 @@ local function Flunium_Boot()
             local head = char:FindFirstChild("Head")
             if not head then continue end
             local aimPos = head.Position + Vector3.new(0, settings.aim2HeightOffset, 0)
-            if settings.aim2WallCheck and not isVisible(char, true) then continue end
             local enemyRoot = char:FindFirstChild("HumanoidRootPart")
-            if settings.aim2MaxDistance and settings.aim2MaxDistance > 0 and enemyRoot then
-                if (enemyRoot.Position - originPos).Magnitude > settings.aim2MaxDistance then continue end
-            end
+            if enemyRoot and not checkMaxDistance((enemyRoot.Position - originPos).Magnitude, settings.aim2MaxDistance) then continue end
             local worldDist = (aimPos - originPos).Magnitude
             if settings.aim2Mode360 then
                 if worldDist < bestS then bestS = worldDist; bestT = p end
@@ -992,6 +1031,22 @@ local function Flunium_Boot()
     end
 
     -- ══════════ SERVER ══════════
+    local lastJobHistory = {}
+    local historyFile = "FluniumHistory.json"
+    local function loadHistory()
+        pcall(function()
+            if isfile and isfile(historyFile) then
+                local data = HttpService:JSONDecode(readfile(historyFile))
+                if type(data) == "table" then lastJobHistory = data end
+            end
+        end)
+    end
+    local function saveHistory()
+        pcall(function()
+            if writefile then writefile(historyFile, HttpService:JSONEncode(lastJobHistory)) end
+        end)
+    end
+    loadHistory()
 
     local function serverHop()
         Fluent:Notify({Title = "🔄 Server Hop", Content = "Поиск...", Duration = 3})
@@ -1003,9 +1058,7 @@ local function Flunium_Boot()
                 if s.playing < s.maxPlayers and s.id ~= game.JobId then table.insert(avail, s.id) end
             end
             if #avail > 0 then
-                local newId = avail[math.random(1, #avail)]
-                addJobToHistory(newId, game.PlaceId)
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, newId, LocalPlayer)
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, avail[math.random(1, #avail)], LocalPlayer)
             else
                 Fluent:Notify({Title = "❌", Content = "Нет других серверов", Duration = 3})
             end
@@ -1013,45 +1066,13 @@ local function Flunium_Boot()
     end
 
     local function rejoinServer()
-        Fluent:Notify({Title = "🔁 Rejoin", Content = "Переподключение...", Duration = 3})
         pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
     end
 
-    local function forceReconnect()
-        Fluent:Notify({Title = "⚡ Force Reconnect", Content = "Принудительное...", Duration = 3})
-        task.spawn(function()
-            for i = 1, 3 do
-                local ok = pcall(function()
-                    TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-                end)
-                if ok then return end
-                task.wait(1)
-            end
-            pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
-        end)
-    end
-
-    local function joinByJobId(jobId)
-        if not jobId or jobId == "" then
-            Fluent:Notify({Title = "❌", Content = "Job ID пустой", Duration = 3}); return
-        end
-        addJobToHistory(jobId, game.PlaceId)
-        pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, LocalPlayer) end)
-    end
-
-    local function joinLastServer()
-        if #lastJobHistory == 0 then
-            Fluent:Notify({Title = "❌", Content = "История пуста", Duration = 3}); return
-        end
-        local last = lastJobHistory[1]
-        pcall(function() TeleportService:TeleportToPlaceInstance(last.place or game.PlaceId, last.id, LocalPlayer) end)
-    end
-
     -- ══════════ GUI ══════════
-
     local Window = Fluent:CreateWindow({
-        Title = "Flunium Client v1.9",
-        SubTitle = "2 Aimbots • ESP • Server Tools • Performance",
+        Title = "Flunium Client v2.0",
+        SubTitle = "2 Aimbots • Silent Kunai • ESP • Server • Performance",
         TabWidth = 160,
         Size = UDim2.fromOffset(600, 520),
         Acrylic = true,
@@ -1061,18 +1082,19 @@ local function Flunium_Boot()
 
     local Tabs = {
         Aimbot = Window:AddTab({ Title = "Aimbot 🎯", Icon = "crosshair" }),
-        Aimbot2 = Window:AddTab({ Title = "Aimbot 2 🎯", Icon = "target" }),
+        Aimbot2 = Window:AddTab({ Title = "Kunai Mark 🎯", Icon = "target" }),
         Silent = Window:AddTab({ Title = "Silent Aim 🎭", Icon = "eye-off" }),
+        SilentKunai = Window:AddTab({ Title = "Silent Kunai 🌀", Icon = "zap" }),
         ESP = Window:AddTab({ Title = "ESP 👁️", Icon = "eye" }),
         Performance = Window:AddTab({ Title = "Performance ⚡", Icon = "zap" }),
         Colors = Window:AddTab({ Title = "Colors 🎨", Icon = "palette" }),
-        Visual = Window:AddTab({ Title = "Visual ✨", Icon = "sun" }),
         Server = Window:AddTab({ Title = "Server 🌐", Icon = "globe" }),
         UI = Window:AddTab({ Title = "UI Settings", Icon = "settings" })
     }
 
     local Options = Fluent.Options
 
+    -- ══════════ AIMBOT 1 ══════════
     Tabs.Aimbot:AddToggle("AimOn", {Title = "Enable Aimbot", Default = false}):OnChanged(function(v)
         aimbotEnabled = v
         if fovCircle then fovCircle.Visible = settings.showFovCircle and v and not settings.mode360 end
@@ -1086,16 +1108,13 @@ local function Flunium_Boot()
         settings.fovColor = c
         if fovCircle and not settings.rainbowFov then fovCircle.Color = c end
     end)
-    Tabs.Aimbot:AddToggle("RainbowFov", {Title = "Rainbow FOV", Default = false}):OnChanged(function(v)
-        settings.rainbowFov = v
-    end)
+    Tabs.Aimbot:AddToggle("RainbowFov", {Title = "Rainbow FOV", Default = false}):OnChanged(function(v) settings.rainbowFov = v end)
     Tabs.Aimbot:AddDropdown("AimPart", {Title = "Aim Part",
         Values = {"HumanoidRootPart", "Head", "UpperTorso", "Torso", "Auto"}, Default = 1
     }):OnChanged(function(v) settings.aimPart = v end)
     Tabs.Aimbot:AddDropdown("AimMode", {Title = "Aim Mode",
         Values = {"Hold (зажать)", "Toggle (переключить)"}, Default = 1
     }):OnChanged(function(v) settings.aimMode = (v == "Hold (зажать)") and "Hold" or "Toggle" end)
-
     local aimBindButton
     aimBindButton = Tabs.Aimbot:AddButton({
         Title = "🎹 BIND: " .. settings.aimKey.Name,
@@ -1107,27 +1126,22 @@ local function Flunium_Boot()
     Tabs.Aimbot:AddSlider("FOV", {Title = "FOV Size", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(v)
         settings.fov = v; if fovCircle then fovCircle.Radius = v end
     end)
-    Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v)
+    Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance (0/5000 = без лимита)", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v)
         settings.maxDistance = v
     end)
-    Tabs.Aimbot:AddToggle("PriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v)
-        settings.prioritizeClose = v
-    end)
+    Tabs.Aimbot:AddToggle("PriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) settings.prioritizeClose = v end)
     Tabs.Aimbot:AddToggle("Mode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
         settings.mode360 = v
         if v and fovCircle then fovCircle.Visible = false end
     end)
-    Tabs.Aimbot:AddSlider("Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v)
-        settings.smoothing = v / 100
-    end)
-    Tabs.Aimbot:AddSlider("Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v)
-        settings.prediction = v / 100
-    end)
+    Tabs.Aimbot:AddSlider("Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v) settings.smoothing = v / 100 end)
+    Tabs.Aimbot:AddSlider("Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v) settings.prediction = v / 100 end)
     Tabs.Aimbot:AddToggle("WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.wallCheck = v end)
     Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.teamCheck = v end)
 
-    Tabs.Aimbot2:AddParagraph({Title = "🎯 Aimbot 2 — Headshot", Content = "Целится ВЫШЕ головы. По умолчанию на клавише [1]"})
-    Tabs.Aimbot2:AddToggle("Aim2On", {Title = "Enable Aimbot 2", Default = false}):OnChanged(function(v)
+    -- ══════════ KUNAI MARK AIMBOT (бывш. Aimbot 2) ══════════
+    Tabs.Aimbot2:AddParagraph({Title = "🎯 Kunai Mark Aimbot", Content = "Целится ВЫШЕ головы (Height Offset). Клавиша по умолчанию [1]."})
+    Tabs.Aimbot2:AddToggle("Aim2On", {Title = "Enable Kunai Mark Aimbot", Default = false}):OnChanged(function(v)
         aim2Enabled = v
         if fovCircle2 then fovCircle2.Visible = settings.aim2ShowFovCircle and v and not settings.aim2Mode360 end
         if not v then aim2ing = false; aim2Target = nil end
@@ -1140,17 +1154,14 @@ local function Flunium_Boot()
         settings.aim2FovColor = c
         if fovCircle2 and not settings.aim2RainbowFov then fovCircle2.Color = c end
     end)
-    Tabs.Aimbot2:AddToggle("Aim2RainbowFov", {Title = "Rainbow FOV", Default = false}):OnChanged(function(v)
-        settings.aim2RainbowFov = v
-    end)
+    Tabs.Aimbot2:AddToggle("Aim2RainbowFov", {Title = "Rainbow FOV", Default = false}):OnChanged(function(v) settings.aim2RainbowFov = v end)
     Tabs.Aimbot2:AddDropdown("Aim2Mode", {Title = "Aim Mode",
         Values = {"Hold (зажать)", "Toggle (переключить)"}, Default = 1
     }):OnChanged(function(v) settings.aim2Mode = (v == "Hold (зажать)") and "Hold" or "Toggle" end)
-
     local aim2BindButton
     aim2BindButton = Tabs.Aimbot2:AddButton({
         Title = "🎹 BIND: " .. settings.aim2Key.Name,
-        Description = "Нажмите для смены клавиши (по умолчанию 1)",
+        Description = "Клавиша аимбота (по умолчанию 1)",
         Callback = function()
             settings.aim2ListeningForBind = true
             pcall(function() aim2BindButton:SetTitle("🎹 Нажмите клавишу...") end)
@@ -1158,64 +1169,37 @@ local function Flunium_Boot()
     })
     Tabs.Aimbot2:AddSlider("Aim2Height", {Title = "📏 Height Above Head (studs)",
         Description = "На сколько studs выше головы целиться",
-        Default = 3, Min = 0, Max = 20, Rounding = 0
+        Default = 16, Min = 0, Max = 50, Rounding = 0
     }):OnChanged(function(v) settings.aim2HeightOffset = v end)
     Tabs.Aimbot2:AddSlider("Aim2FOV", {Title = "FOV Size", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(v)
         settings.aim2Fov = v; if fovCircle2 then fovCircle2.Radius = v end
     end)
-    Tabs.Aimbot2:AddSlider("Aim2MaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v)
+    Tabs.Aimbot2:AddSlider("Aim2MaxDist", {Title = "Max Distance (0/5000 = без лимита)", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v)
         settings.aim2MaxDistance = v
     end)
-    Tabs.Aimbot2:AddToggle("Aim2PriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v)
-        settings.aim2PrioritizeClose = v
-    end)
+    Tabs.Aimbot2:AddToggle("Aim2PriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) settings.aim2PrioritizeClose = v end)
     Tabs.Aimbot2:AddToggle("Aim2Mode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
         settings.aim2Mode360 = v
         if v and fovCircle2 then fovCircle2.Visible = false end
     end)
-    Tabs.Aimbot2:AddSlider("Aim2Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v)
-        settings.aim2Smoothing = v / 100
-    end)
-    Tabs.Aimbot2:AddSlider("Aim2Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v)
-        settings.aim2Prediction = v / 100
-    end)
+    Tabs.Aimbot2:AddSlider("Aim2Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v) settings.aim2Smoothing = v / 100 end)
+    Tabs.Aimbot2:AddSlider("Aim2Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v) settings.aim2Prediction = v / 100 end)
     Tabs.Aimbot2:AddToggle("Aim2WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.aim2WallCheck = v end)
     Tabs.Aimbot2:AddToggle("Aim2TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.aim2TeamCheck = v end)
 
-    local markerSection = Tabs.Aimbot2:AddSection("Kunai Marker")
-    markerSection:AddToggle("MarkerClick", {Title = "🌀 Enable Marker Hack", Default = false}):OnChanged(function(v)
-        markerClick.Enabled = v
-        if v then
-            enableUnifiedHook()
-            Fluent:Notify({Title = "🌀 Marker ВКЛ", Content = "Зажми " .. markerClick.ModifierKey.Name, Duration = 3})
-        else
-            if not silentAim.MasterEnabled then disableUnifiedHook() end
-        end
-    end)
-
-    local markerBindBtn
-    markerBindBtn = markerSection:AddButton({
-        Title = "🎹 Modifier: " .. markerClick.ModifierKey.Name,
-        Callback = function()
-            markerClick.ListeningForBind = true
-            pcall(function() markerBindBtn:SetTitle("🎹 Нажмите...") end)
-        end
-    })
-    markerSection:AddSlider("MarkerH", {Title = "📏 Marker Height", Default = 3, Min = 0, Max = 20, Rounding = 0}):OnChanged(function(v)
-        markerClick.HeightOffset = v
-    end)
-    markerSection:AddToggle("MarkerDebug", {Title = "🔍 Debug", Default = false}):OnChanged(function(v) markerClick.Debug = v end)
-
+    -- ══════════ SILENT AIM ══════════
     Tabs.Silent:AddToggle("SilentMaster", {Title = "Enable Silent Aim", Default = false}):OnChanged(function(v)
         silentAim.MasterEnabled = v
         if v then enableUnifiedHook() else
-            if not markerClick.Enabled then disableUnifiedHook() end
+            if not (silentKunai.MasterEnabled or perf.blockNewEffects) then disableUnifiedHook() end
         end
+    end)
+    Tabs.Silent:AddToggle("SilentShowFOV", {Title = "Show FOV Circle", Default = true}):OnChanged(function(v)
+        silentAim.ShowFovCircle = v
     end)
     Tabs.Silent:AddDropdown("SilentMode", {Title = "Режим", Values = {"Hold", "Toggle"}, Default = 1}):OnChanged(function(v)
         silentAim.Mode = v
     end)
-
     local silentBindButton
     silentBindButton = Tabs.Silent:AddButton({
         Title = "🎹 BIND: " .. silentAim.HoldKey.Name,
@@ -1227,30 +1211,47 @@ local function Flunium_Boot()
     Tabs.Silent:AddSlider("SilentFOV", {Title = "FOV Radius", Default = 500, Min = 50, Max = 2000, Rounding = 0}):OnChanged(function(v)
         silentAim.FOV = v; if silentFovCircle then silentFovCircle.Radius = v end
     end)
-    Tabs.Silent:AddSlider("SilentPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v)
-        silentAim.Prediction = v / 100
-    end)
-    Tabs.Silent:AddSlider("SilentMaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v)
-        silentAim.MaxDistance = v
-    end)
-    Tabs.Silent:AddToggle("SilentPriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v)
-        silentAim.PrioritizeClose = v
-    end)
-    Tabs.Silent:AddToggle("SilentMode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
-        silentAim.Mode360 = v
-    end)
+    Tabs.Silent:AddSlider("SilentPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) silentAim.Prediction = v / 100 end)
+    Tabs.Silent:AddSlider("SilentMaxDist", {Title = "Max Distance (0/5000 = без лимита)", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v) silentAim.MaxDistance = v end)
+    Tabs.Silent:AddToggle("SilentPriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) silentAim.PrioritizeClose = v end)
+    Tabs.Silent:AddToggle("SilentMode360", {Title = "360° Mode", Default = false}):OnChanged(function(v) silentAim.Mode360 = v end)
     Tabs.Silent:AddButton({
         Title = "🔄 Переустановить хук",
         Callback = function()
             disableUnifiedHook(); task.wait(0.3)
-            if silentAim.MasterEnabled or markerClick.Enabled then enableUnifiedHook() end
+            if silentAim.MasterEnabled or silentKunai.MasterEnabled or perf.blockNewEffects then enableUnifiedHook() end
         end
     })
 
-    Tabs.ESP:AddToggle("ESPOn", {Title = "Enable ESP",
-        Description = "Показывает HP (зелёный), MD (фиолетовый), Dodge (ON/КД)",
-        Default = false
-    }):OnChanged(function(v)
+    -- ══════════ SILENT AIM KUNAI MARK ══════════
+    Tabs.SilentKunai:AddParagraph({Title = "🌀 Silent Aim Kunai Mark", Content = "Подменяет fixmouse на Head + Height Offset. Клавиша по умолчанию [2]."})
+    Tabs.SilentKunai:AddToggle("SilentKunaiMaster", {Title = "Enable Silent Aim Kunai Mark", Default = false}):OnChanged(function(v)
+        silentKunai.MasterEnabled = v
+        if v then enableUnifiedHook() else
+            if not (silentAim.MasterEnabled or perf.blockNewEffects) then disableUnifiedHook() end
+        end
+    end)
+    Tabs.SilentKunai:AddToggle("SilentKunaiShowFOV", {Title = "Show FOV Circle", Default = true}):OnChanged(function(v) silentKunai.ShowFovCircle = v end)
+    Tabs.SilentKunai:AddDropdown("SilentKunaiMode", {Title = "Режим", Values = {"Hold", "Toggle"}, Default = 1}):OnChanged(function(v) silentKunai.Mode = v end)
+    local silentKunaiBindButton
+    silentKunaiBindButton = Tabs.SilentKunai:AddButton({
+        Title = "🎹 BIND: " .. silentKunai.HoldKey.Name,
+        Callback = function()
+            silentKunai.ListeningForBind = true
+            pcall(function() silentKunaiBindButton:SetTitle("🎹 Нажмите...") end)
+        end
+    })
+    Tabs.SilentKunai:AddSlider("SilentKunaiHeight", {Title = "📏 Height Offset (studs)", Default = 16, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) silentKunai.HeightOffset = v end)
+    Tabs.SilentKunai:AddSlider("SilentKunaiFOV", {Title = "FOV Radius", Default = 500, Min = 50, Max = 2000, Rounding = 0}):OnChanged(function(v)
+        silentKunai.FOV = v; if silentKunaiFovCircle then silentKunaiFovCircle.Radius = v end
+    end)
+    Tabs.SilentKunai:AddSlider("SilentKunaiPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) silentKunai.Prediction = v / 100 end)
+    Tabs.SilentKunai:AddSlider("SilentKunaiMaxDist", {Title = "Max Distance (0/5000 = без лимита)", Default = 0, Min = 0, Max = 5000, Rounding = 50}):OnChanged(function(v) silentKunai.MaxDistance = v end)
+    Tabs.SilentKunai:AddToggle("SilentKunaiPriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) silentKunai.PrioritizeClose = v end)
+    Tabs.SilentKunai:AddToggle("SilentKunaiMode360", {Title = "360° Mode", Default = false}):OnChanged(function(v) silentKunai.Mode360 = v end)
+
+    -- ══════════ ESP ══════════
+    Tabs.ESP:AddToggle("ESPOn", {Title = "Enable ESP", Default = false}):OnChanged(function(v)
         ESP.Enabled = v; ESP.Visible = v
         if v then
             for _, p in ipairs(Players:GetPlayers()) do
@@ -1262,9 +1263,9 @@ local function Flunium_Boot()
         end
     end)
     Tabs.ESP:AddToggle("EspName", {Title = "Show Name", Default = true}):OnChanged(function(v) ESP.ShowName = v; rebuildESP() end)
-    Tabs.ESP:AddToggle("EspHP", {Title = "Show HP (green)", Default = true}):OnChanged(function(v) ESP.ShowHP = v; rebuildESP() end)
-    Tabs.ESP:AddToggle("EspMD", {Title = "Show MD (purple)", Default = true}):OnChanged(function(v) ESP.ShowMD = v; rebuildESP() end)
-    Tabs.ESP:AddToggle("EspDodge", {Title = "Show Body Dodge (ON/КД)", Default = true}):OnChanged(function(v) ESP.ShowDodge = v; rebuildESP() end)
+    Tabs.ESP:AddToggle("EspHP", {Title = "Show HP", Default = true}):OnChanged(function(v) ESP.ShowHP = v; rebuildESP() end)
+    Tabs.ESP:AddToggle("EspMD", {Title = "Show MD", Default = true}):OnChanged(function(v) ESP.ShowMD = v; rebuildESP() end)
+    Tabs.ESP:AddToggle("EspDodge", {Title = "Show Body Dodge", Default = true}):OnChanged(function(v) ESP.ShowDodge = v; rebuildESP() end)
     Tabs.ESP:AddSlider("EspSize", {Title = "ESP Size", Default = 100, Min = 30, Max = 300, Rounding = 0}):OnChanged(function(v)
         ESP.Size = v / 100
         for _, d in pairs(espData) do
@@ -1274,106 +1275,44 @@ local function Flunium_Boot()
             end
         end
     end)
-    Tabs.ESP:AddSlider("EspRate", {Title = "Update Rate (ms)", Default = 200, Min = 50, Max = 2000, Rounding = 50}):OnChanged(function(v)
-        ESP.UpdateRate = v / 1000
-    end)
     Tabs.ESP:AddColorpicker("EspNameC", {Title = "Name Color", Default = Color3.fromRGB(255, 255, 255)}):OnChanged(function(c) ESP.NameColor = c end)
     Tabs.ESP:AddColorpicker("EspHPC", {Title = "HP Color", Default = Color3.fromRGB(0, 255, 0)}):OnChanged(function(c) ESP.HPColor = c end)
     Tabs.ESP:AddColorpicker("EspMDC", {Title = "MD Color", Default = Color3.fromRGB(200, 100, 255)}):OnChanged(function(c) ESP.MDColor = c end)
-    Tabs.ESP:AddColorpicker("EspDodgeOnC", {Title = "Dodge ON Color", Default = Color3.fromRGB(0, 255, 0)}):OnChanged(function(c) ESP.DodgeOnColor = c end)
-    Tabs.ESP:AddColorpicker("EspDodgeCDC", {Title = "Dodge КД Color", Default = Color3.fromRGB(255, 60, 60)}):OnChanged(function(c) ESP.DodgeCDColor = c end)
 
-    local espWhitelistSection = Tabs.ESP:AddSection("Player Whitelist (пусто = все)")
-    Tabs.ESP:AddButton({
-        Title = "🔄 Обновить список игроков",
-        Callback = function()
-            local playerList = {}
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer then table.insert(playerList, p) end
-            end
-            if #playerList == 0 then
-                Fluent:Notify({Title = "ℹ️", Content = "Нет игроков", Duration = 3}); return
-            end
-            for _, p in ipairs(playerList) do
-                local isWL = ESP.Whitelist[p.Name] == true
-                espWhitelistSection:AddButton({
-                    Title = (isWL and "✓ " or "  ") .. p.Name,
-                    Callback = function()
-                        if ESP.Whitelist[p.Name] then ESP.Whitelist[p.Name] = nil
-                        else ESP.Whitelist[p.Name] = true end
-                        rebuildESP()
-                    end
-                })
-            end
-        end
-    })
+    -- ══════════ PERFORMANCE (включая бывшие Visual) ══════════
+    Tabs.Performance:AddSection("Performance Tools")
+    Tabs.Performance:AddToggle("LowDetail", {Title = "Low Detail Mode", Default = false}):OnChanged(applyLowDetail)
+    Tabs.Performance:AddToggle("RemoveTextures", {Title = "Remove Textures", Default = false}):OnChanged(applyRemoveTextures)
+    Tabs.Performance:AddToggle("RemoveDecals", {Title = "Remove Decals", Default = false}):OnChanged(applyRemoveDecals)
+    Tabs.Performance:AddToggle("RemoveParticles", {Title = "Remove Particles", Default = false}):OnChanged(applyRemoveParticles)
+    Tabs.Performance:AddToggle("RemoveShadows", {Title = "Remove Shadows", Default = false}):OnChanged(applyRemoveShadows)
+    Tabs.Performance:AddToggle("ForcePlastic", {Title = "Force Plastic Material", Default = false}):OnChanged(applyForcePlastic)
+    Tabs.Performance:AddToggle("DisablePost", {Title = "Disable Post-Processing", Default = false}):OnChanged(applyDisablePostFx)
+    Tabs.Performance:AddToggle("ExtendFog", {Title = "Extend Fog Distance", Default = false}):OnChanged(applyExtendFog)
+    Tabs.Performance:AddToggle("OptimizeWater", {Title = "Optimize Water", Default = false}):OnChanged(applyOptimizeWater)
+    Tabs.Performance:AddToggle("RemoveLights", {Title = "Remove Lights", Default = false}):OnChanged(applyRemoveLights)
+    Tabs.Performance:AddToggle("RemoveBeams", {Title = "Remove Beams & Trails", Default = false}):OnChanged(applyRemoveBeams)
+    Tabs.Performance:AddToggle("RemoveHighlights", {Title = "Remove Highlights", Default = false}):OnChanged(applyRemoveHighlights)
+    Tabs.Performance:AddToggle("HideAccessories", {Title = "Hide Accessories", Default = false}):OnChanged(applyHideAccessories)
+    Tabs.Performance:AddToggle("RemoveCharFx", {Title = "Remove Character Effects", Default = false}):OnChanged(applyRemoveCharFx)
 
-    Tabs.Performance:AddParagraph({
-        Title = "⚡ Performance Tools",
-        Content = "Low Detail Mode — базовые настройки (textures, decals, particles, shadows, postfx, water). Расширенные настройки ниже — включаются отдельно."
-    })
-    Tabs.Performance:AddToggle("LowDetail", {Title = "Low Detail Mode",
-        Description = "Отключает только базовое: textures, decals, particles, shadows, postfx, water",
-        Default = false
-    }):OnChanged(function(v)
-        perf.lowDetail = v
-        -- ✅ LDM больше НЕ трогает расширенные тумблеры
-        if v then
-            setRemoveTextures(true); setRemoveDecals(true); setRemoveParticles(true)
-            setRemoveShadows(true); setDisablePostFx(true); setOptimizeWater(true)
-        else
-            setRemoveTextures(false); setRemoveDecals(false); setRemoveParticles(false)
-            setRemoveShadows(false); setDisablePostFx(false); setOptimizeWater(false)
-            perf.cachedProps = {}
-            perf.cachedLight = {}
-        end
-    end)
-    Tabs.Performance:AddToggle("RemoveTextures", {Title = "Remove Textures", Default = false}):OnChanged(setRemoveTextures)
-    Tabs.Performance:AddToggle("RemoveDecals", {Title = "Remove Decals", Default = false}):OnChanged(setRemoveDecals)
-    Tabs.Performance:AddToggle("RemoveParticles", {Title = "Remove Particles (TimeScale+Clear)", Default = false}):OnChanged(setRemoveParticles)
-    Tabs.Performance:AddToggle("RemoveShadows", {Title = "Remove Shadows", Default = false}):OnChanged(setRemoveShadows)
-    Tabs.Performance:AddToggle("ForcePlastic", {Title = "Force Plastic Material", Default = false}):OnChanged(setForcePlastic)
-    Tabs.Performance:AddToggle("DisablePost", {Title = "Disable Post-Processing", Default = false}):OnChanged(setDisablePostFx)
-    Tabs.Performance:AddToggle("ExtendFog", {Title = "Extend Fog Distance", Default = false}):OnChanged(setExtendFog)
-    Tabs.Performance:AddToggle("OptimizeWater", {Title = "Optimize Water", Default = false}):OnChanged(setOptimizeWater)
-    Tabs.Performance:AddToggle("RemoveLights", {Title = "Remove Lights (aura/glow)", Default = false}):OnChanged(setRemoveLights)
-    Tabs.Performance:AddToggle("RemoveBeams", {Title = "Remove Beams & Trails", Default = false}):OnChanged(setRemoveBeams)
-    Tabs.Performance:AddToggle("RemoveHighlights", {Title = "Remove Highlights", Default = false}):OnChanged(setRemoveHighlights)
-    Tabs.Performance:AddToggle("HideAccessories", {Title = "Hide Accessories (hair/clothes)", Default = false}):OnChanged(setHideAccessories)
-    Tabs.Performance:AddToggle("RemoveCharFx", {Title = "Remove Character Effects (full)", Default = false}):OnChanged(setRemoveCharFx)
-    Tabs.Performance:AddToggle("BlockNewFx", {Title = "Block New Effects (__newindex hook)", Default = false}):OnChanged(function(v)
-        perf.blockNewEffects = v
-        if v and not unifiedHook then enableUnifiedHook() end
-    end)
+    Tabs.Performance:AddSection("Visual (перенесено)")
+    Tabs.Performance:AddToggle("XRay", {Title = "X-Ray", Default = false}):OnChanged(applyXRay)
+    Tabs.Performance:AddToggle("FB", {Title = "Full Bright", Default = false}):OnChanged(applyFullBright)
+    Tabs.Performance:AddToggle("NV", {Title = "Night Vision", Default = false}):OnChanged(applyNightVision)
+    Tabs.Performance:AddToggle("NoSh", {Title = "No Shadows", Default = false}):OnChanged(applyNoShadows)
+    Tabs.Performance:AddToggle("NoBl", {Title = "No Bloom", Default = false}):OnChanged(applyNoBloom)
+    Tabs.Performance:AddToggle("NoSR", {Title = "No Sun Rays", Default = false}):OnChanged(applyNoSunRays)
+    Tabs.Performance:AddToggle("NoFog", {Title = "No Fog", Default = false}):OnChanged(applyNoFog)
 
     Tabs.Performance:AddSection("FPS Unlocker")
-    Tabs.Performance:AddToggle("FpsUnlock", {Title = "🔓 Unlock FPS Cap",
-        Description = "Снимает стандартный лимит 60 FPS через setfpscap()",
-        Default = false
-    }):OnChanged(setFpsUnlock)
-    Tabs.Performance:AddSlider("FpsCap", {Title = "FPS Cap (if unlocked)", Default = 999,
-        Min = 30, Max = 999, Rounding = 0
-    }):OnChanged(function(v)
+    Tabs.Performance:AddToggle("FpsUnlock", {Title = "🔓 Unlock FPS Cap", Default = false}):OnChanged(applyFpsUnlock)
+    Tabs.Performance:AddSlider("FpsCap", {Title = "FPS Cap", Default = 999, Min = 30, Max = 999, Rounding = 0}):OnChanged(function(v)
         perf.fpsCap = v
         if perf.fpsUnlock then pcall(function() setfpscap(v) end) end
     end)
-    Tabs.Performance:AddButton({
-        Title = "Применить FPS Cap",
-        Callback = function()
-            pcall(function() setfpscap(perf.fpsCap) end)
-            Fluent:Notify({Title = "⚡ FPS", Content = "Cap set to " .. tostring(perf.fpsCap), Duration = 2})
-        end
-    })
-    local statusPara = Tabs.Performance:AddParagraph({Title = "📊 Status", Content = "Low Detail: OFF | FPS: " .. tostring(perf.fpsCap)})
-    task.spawn(function()
-        while task.wait(1) do
-            pcall(function()
-                statusPara:SetDesc("Low Detail: " .. (perf.lowDetail and "ON" or "OFF") .. " | FPS: " .. tostring(perf.fpsCap))
-            end)
-        end
-    end)
 
-    Tabs.Colors:AddToggle("InvertColors", {Title = "Инвертировать цвет", Default = true}):OnChanged(function(v) colors.Invert = v end)
+    -- ══════════ COLORS ══════════
     Tabs.Colors:AddToggle("RainbowSkin", {Title = "Rainbow Skin", Default = false}):OnChanged(function(v) colors.RainbowSkin = v end)
     Tabs.Colors:AddToggle("RainbowHair", {Title = "Rainbow Hair", Default = false}):OnChanged(function(v) colors.RainbowHair = v end)
     Tabs.Colors:AddSlider("SkinSpd", {Title = "Skin Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v) colors.SkinSpeed = v / 10 end)
@@ -1393,28 +1332,6 @@ local function Flunium_Boot()
     }
     for _, preset in ipairs(colorPresets) do
         Tabs.Colors:AddButton({
-            Title = preset.name .. " СКИН",
-            Callback = function()
-                if shindoEvent then
-                    local str = string.format("%d,%d,%d", preset.r, preset.g, preset.b)
-                    pcall(function() shindoEvent:FireServer("skin", str) end)
-                end
-            end
-        })
-    end
-    Tabs.Colors:AddColorpicker("CustomSkin", {Title = "Кастомный скин", Default = Color3.fromRGB(255, 0, 0)})
-    Tabs.Colors:AddButton({
-        Title = "✅ Применить кастомный скин",
-        Callback = function()
-            local c = Options.CustomSkin.Value
-            if c and shindoEvent then
-                local str = string.format("%d,%d,%d", math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
-                pcall(function() shindoEvent:FireServer("skin", str) end)
-            end
-        end
-    })
-    for _, preset in ipairs(colorPresets) do
-        Tabs.Colors:AddButton({
             Title = preset.name .. " ВОЛОСЫ",
             Callback = function()
                 if shindoEvent then
@@ -1424,207 +1341,29 @@ local function Flunium_Boot()
             end
         })
     end
-    Tabs.Colors:AddColorpicker("CustomHair", {Title = "Кастомные волосы", Default = Color3.fromRGB(255, 0, 0)})
-    Tabs.Colors:AddButton({
-        Title = "✅ Применить кастомные волосы",
-        Callback = function()
-            local c = Options.CustomHair.Value
-            if c and shindoEvent then
-                local str = string.format("%d,%d,%d", math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
-                pcall(function() shindoEvent:FireServer("haircolor", str) end)
-            end
-        end
-    })
-
-    Tabs.Visual:AddToggle("XRay", {Title = "X-Ray", Default = false}):OnChanged(function(v)
-        settings.xray = v
-        pcall(function()
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("BasePart") then
-                    if v then
-                        if not obj:GetAttribute("OT") then obj:SetAttribute("OT", obj.Transparency) end
-                        obj.LocalTransparencyModifier = 0.5
-                    else
-                        local o = obj:GetAttribute("OT")
-                        if o then obj.LocalTransparencyModifier = o end
-                    end
+    for _, preset in ipairs(colorPresets) do
+        Tabs.Colors:AddButton({
+            Title = preset.name .. " СКИН",
+            Callback = function()
+                if shindoEvent then
+                    local str = string.format("%d,%d,%d", preset.r, preset.g, preset.b)
+                    pcall(function() shindoEvent:FireServer("skin", str) end)
                 end
             end
-        end)
-    end)
-    Tabs.Visual:AddToggle("FB", {Title = "Full Bright", Default = false}):OnChanged(function(v)
-        settings.fullBright = v
-        if v then
-            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-            Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-            Lighting.Brightness = 3; Lighting.ClockTime = 12
-        else
-            Lighting.Ambient = originalLighting.Ambient
-            Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
-            Lighting.Brightness = originalLighting.Brightness
-            Lighting.ClockTime = originalLighting.ClockTime
-        end
-    end)
-    Tabs.Visual:AddToggle("NV", {Title = "Night Vision", Default = false}):OnChanged(function(v)
-        settings.nightVision = v
-        pcall(function()
-            local nv = Lighting:FindFirstChild("NVEffect")
-            if v then
-                if not nv then
-                    nv = Instance.new("ColorCorrectionEffect")
-                    nv.Name = "NVEffect"; nv.Brightness = 0.3; nv.Contrast = 0.5
-                    nv.Saturation = -0.5; nv.TintColor = Color3.fromRGB(0, 255, 0)
-                    nv.Parent = Lighting
-                end
-                nv.Enabled = true
-            elseif nv then nv.Enabled = false end
-        end)
-    end)
-    Tabs.Visual:AddToggle("NoSh", {Title = "No Shadows", Default = false}):OnChanged(function(v)
-        Lighting.GlobalShadows = not v
-    end)
-    Tabs.Visual:AddToggle("NoBl", {Title = "No Bloom", Default = false}):OnChanged(function(v)
-        pcall(function()
-            for _, e in ipairs(Lighting:GetChildren()) do
-                if e:IsA("BloomEffect") then e.Enabled = not v end
-            end
-        end)
-    end)
-    Tabs.Visual:AddToggle("NoSR", {Title = "No Sun Rays", Default = false}):OnChanged(function(v)
-        pcall(function()
-            for _, e in ipairs(Lighting:GetChildren()) do
-                if e:IsA("SunRaysEffect") then e.Enabled = not v end
-            end
-        end)
-    end)
-    Tabs.Visual:AddToggle("NoFog", {Title = "No Fog", Default = false}):OnChanged(function(v)
-        if v then
-            Lighting.FogEnd = 100000; Lighting.FogStart = 100000
-        else
-            Lighting.FogEnd = originalLighting.FogEnd
-            Lighting.FogStart = originalLighting.FogStart
-        end
-    end)
+        })
+    end
 
-    local jobIdPara = Tabs.Server:AddParagraph({Title = "📋 Current Job ID", Content = tostring(game.JobId)})
-    Tabs.Server:AddButton({
-        Title = "📄 Скопировать текущий Job ID",
-        Description = "Кладёт в буфер ID этого сервера (только публичные)",
-        Callback = function()
-            pcall(function()
-                if setclipboard then setclipboard(tostring(game.JobId)) end
-            end)
-            Fluent:Notify({Title = "📋", Content = "Job ID скопирован", Duration = 2})
-        end
-    })
-    Tabs.Server:AddButton({
-        Title = "🔄 Обновить Job ID",
-        Callback = function() pcall(function() jobIdPara:SetDesc(tostring(game.JobId)) end) end
-    })
-
-    local joinIdBox = Tabs.Server:AddInput("JoinJobId", {
-        Title = "Join by Job ID",
-        Description = "Вставь Job ID публичного сервера (сервер должен быть жив)",
-        Placeholder = "e.g. a1b2c3d4e5f6a...",
-        Default = ""
-    })
-    Tabs.Server:AddButton({
-        Title = "▶️ JOIN по Job ID",
-        Callback = function()
-            local v = Options.JoinJobId.Value
-            if v and v ~= "" then joinByJobId(v)
-            else Fluent:Notify({Title = "❌", Content = "Введи Job ID", Duration = 2}) end
-        end
-    })
-    Tabs.Server:AddButton({
-        Title = "📥 Вставить из буфера",
-        Callback = function()
-            pcall(function()
-                if getclipboard then Options.JoinJobId:SetValue(getclipboard()) end
-            end)
-        end
-    })
-    Tabs.Server:AddButton({
-        Title = "↩️ Join Last Server",
-        Description = "Вернуться на предыдущий сервер одним кликом",
-        Callback = function() joinLastServer() end
-    })
-
-    local lastList = Tabs.Server:AddDropdown("LastServers", {
-        Title = "📜 Последние Job ID",
-        Description = "Выбери запись — подключение произойдёт автоматически",
-        Values = {},
-        Default = 1
-    }):OnChanged(function(v)
-        if v and v ~= "" then
-            for _, rec in ipairs(lastJobHistory) do
-                if rec.id == v then
-                    pcall(function() TeleportService:TeleportToPlaceInstance(rec.place or game.PlaceId, rec.id, LocalPlayer) end)
-                    break
-                end
-            end
-        end
-    end)
-    Tabs.Server:AddButton({
-        Title = "🔄 Обновить список истории",
-        Callback = function()
-            local opts = {}
-            for _, rec in ipairs(lastJobHistory) do
-                local t = os.date("%H:%M:%S", rec.time)
-                table.insert(opts, rec.id .. " | " .. t)
-            end
-            if #opts == 0 then opts = {"— пусто —"} end
-            pcall(function() lastList:SetValues(opts) end)
-        end
-    })
-    Tabs.Server:AddButton({
-        Title = "🗑 Очистить историю",
-        Callback = function()
-            lastJobHistory = {}
-            saveHistory()
-            pcall(function() lastList:SetValues({"— пусто —"}) end)
-        end
-    })
-
-    Tabs.Server:AddSection("Network")
-    local pingPara = Tabs.Server:AddParagraph({Title = "📶 Ping / Server Region", Content = "..."})
-    local ipPara = Tabs.Server:AddParagraph({Title = "📡 Server IP / Location", Content = "..."})
-    local regionDetailPara = Tabs.Server:AddParagraph({Title = "📍 Server Region (detailed)", Content = "..."})
-
+    -- ══════════ SERVER ══════════
     Tabs.Server:AddButton({Title = "🔄 Server Hop", Callback = serverHop})
     Tabs.Server:AddButton({Title = "🔁 ReJoin Server", Callback = rejoinServer})
-    Tabs.Server:AddButton({Title = "⚡ Force Reconnect", Callback = forceReconnect})
-    Tabs.Server:AddButton({
-        Title = "🔄 Обновить данные о сервере",
-        Description = "Перезапрашивает IP и геолокацию сервера",
-        Callback = function() Fluent:Notify({Title = "🔄", Content = "Обновление...", Duration = 2}) end
-    })
 
-    task.spawn(function()
-        task.wait(1)
-        while task.wait(2) do
-            local p = getPlayerPing()
-            local c = p < 100 and "🟢" or (p < 200 and "🟡" or "🔴")
-            pcall(function() pingPara:SetDesc(c .. " " .. p .. " ms | " .. getServerRegion()) end)
-        end
-    end)
-    task.spawn(function()
-        task.wait(3)
-        while task.wait(20) do
-            pcall(function()
-                local ip = getServerIP()
-                ipPara:SetDesc("IP: " .. ip)
-                regionDetailPara:SetDesc("Region: " .. getServerRegion() .. " | JobId: " .. tostring(game.JobId):sub(1, 8))
-            end)
-        end
-    end)
-
+    -- ══════════ INPUT ══════════
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
-        if markerClick.ListeningForBind and input.UserInputType == Enum.UserInputType.Keyboard then
-            markerClick.ModifierKey = input.KeyCode
-            markerClick.ListeningForBind = false
-            pcall(function() markerBindBtn:SetTitle("🎹 Modifier: " .. input.KeyCode.Name) end)
+        if silentKunai.ListeningForBind and input.UserInputType == Enum.UserInputType.Keyboard then
+            silentKunai.HoldKey = input.KeyCode
+            silentKunai.ListeningForBind = false
+            pcall(function() silentKunaiBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end)
             return
         end
         if silentAim.ListeningForBind and input.UserInputType == Enum.UserInputType.Keyboard then
@@ -1648,6 +1387,9 @@ local function Flunium_Boot()
         if silentAim.MasterEnabled and silentAim.Mode == "Toggle" and input.KeyCode == silentAim.HoldKey then
             silentAim.Enabled = not silentAim.Enabled
         end
+        if silentKunai.MasterEnabled and silentKunai.Mode == "Toggle" and input.KeyCode == silentKunai.HoldKey then
+            silentKunai.Enabled = not silentKunai.Enabled
+        end
         if aimbotEnabled and input.KeyCode == settings.aimKey then
             if settings.aimMode == "Hold" then aiming = true
             else aiming = not aiming; if not aiming then currentTarget = nil end end
@@ -1668,17 +1410,13 @@ local function Flunium_Boot()
         end
     end)
 
+    -- ══════════ RENDER ══════════
     RunService.RenderStepped:Connect(function()
         if aimbotEnabled and settings.aimMode == "Hold" then
             aiming = UserInputService:IsKeyDown(settings.aimKey)
         end
         if aim2Enabled and settings.aim2Mode == "Hold" then
             aim2ing = UserInputService:IsKeyDown(settings.aim2Key)
-        end
-        if settings.rainbowLighting then
-            lightingHue = (lightingHue + 0.005) % 1
-            local c = Color3.fromHSV(lightingHue, 1, 1)
-            Lighting.Ambient = c; Lighting.OutdoorAmbient = c
         end
         local mpos = UserInputService:GetMouseLocation()
         if aimbotEnabled and fovCircle and settings.showFovCircle and not settings.mode360 then
@@ -1693,6 +1431,7 @@ local function Flunium_Boot()
                 fovCircle.Color = settings.fovColor
             end
         elseif fovCircle then fovCircle.Visible = false end
+
         if aim2Enabled and fovCircle2 and settings.aim2ShowFovCircle and not settings.aim2Mode360 then
             fovCircle2.Position = Vector2.new(mpos.X, mpos.Y + 50)
             fovCircle2.Visible = true
@@ -1705,12 +1444,21 @@ local function Flunium_Boot()
                 fovCircle2.Color = settings.aim2FovColor
             end
         elseif fovCircle2 then fovCircle2.Visible = false end
+
         if silentAim.MasterEnabled and silentFovCircle and silentAim.ShowFovCircle and not silentAim.Mode360 then
             silentFovCircle.Position = Vector2.new(mpos.X, mpos.Y + 50)
             silentFovCircle.Radius = silentAim.FOV
             silentFovCircle.Color = silentAim.FovColor
             silentFovCircle.Visible = silentAim.Enabled
         elseif silentFovCircle then silentFovCircle.Visible = false end
+
+        if silentKunai.MasterEnabled and silentKunaiFovCircle and silentKunai.ShowFovCircle and not silentKunai.Mode360 then
+            silentKunaiFovCircle.Position = Vector2.new(mpos.X, mpos.Y + 50)
+            silentKunaiFovCircle.Radius = silentKunai.FOV
+            silentKunaiFovCircle.Color = silentKunai.FovColor
+            silentKunaiFovCircle.Visible = silentKunai.Enabled
+        elseif silentKunaiFovCircle then silentKunaiFovCircle.Visible = false end
+
         if aiming then
             local t = tick()
             if t - lastTargetUpdate > 0.01 then
@@ -1719,6 +1467,7 @@ local function Flunium_Boot()
             end
             if currentTarget then aimAtTarget(currentTarget) end
         else currentTarget = nil end
+
         if aim2ing then
             local t = tick()
             if t - lastTarget2Update > 0.01 then
@@ -1761,7 +1510,6 @@ local function Flunium_Boot()
         SaveManager:SetLibrary(Fluent)
         InterfaceManager:SetLibrary(Fluent)
         SaveManager:IgnoreThemeSettings()
-        SaveManager:SetIgnoreIndexes({})
         InterfaceManager:SetFolder("FluniumClient")
         SaveManager:SetFolder("FluniumClient/Configs")
         InterfaceManager:BuildInterfaceSection(Tabs.UI)
@@ -1769,66 +1517,15 @@ local function Flunium_Boot()
         SaveManager:LoadAutoloadConfig()
     end)
 
-    local bindFile = "FluniumClient/binds.json"
-    local function saveBinds()
-        pcall(function()
-            local data = {
-                aimKey = settings.aimKey.Name,
-                aim2Key = settings.aim2Key.Name,
-                silentKey = silentAim.HoldKey.Name,
-                markerKey = markerClick.ModifierKey.Name,
-            }
-            if writefile then writefile(bindFile, HttpService:JSONEncode(data)) end
-        end)
-    end
-
-    local function loadBinds()
-        pcall(function()
-            if isfile and isfile(bindFile) then
-                local data = HttpService:JSONDecode(readfile(bindFile))
-                if data.aimKey then settings.aimKey = Enum.KeyCode[data.aimKey] or settings.aimKey end
-                if data.aim2Key then settings.aim2Key = Enum.KeyCode[data.aim2Key] or settings.aim2Key end
-                if data.silentKey then silentAim.HoldKey = Enum.KeyCode[data.silentKey] or silentAim.HoldKey end
-                if data.markerKey then markerClick.ModifierKey = Enum.KeyCode[data.markerKey] or markerClick.ModifierKey end
-                pcall(function() aimBindButton:SetTitle("🎹 BIND: " .. settings.aimKey.Name) end)
-                pcall(function() aim2BindButton:SetTitle("🎹 BIND: " .. settings.aim2Key.Name) end)
-                pcall(function() silentBindButton:SetTitle("🎹 BIND: " .. silentAim.HoldKey.Name) end)
-                pcall(function() markerBindBtn:SetTitle("🎹 Modifier: " .. markerClick.ModifierKey.Name) end)
-            end
-        end)
-    end
-
-    loadBinds()
-
-    local oldSaveConfig = SaveManager.SaveConfig
-    SaveManager.SaveConfig = function(self, name)
-        oldSaveConfig(self, name)
-        saveBinds()
-    end
-
-    local oldLoadConfig = SaveManager.LoadConfig
-    SaveManager.LoadConfig = function(self, name)
-        oldLoadConfig(self, name)
-        task.defer(loadBinds)
-    end
-
-    UserInputService.InputBegan:Connect(function(input, gp)
-        if gp then return end
-        task.delay(0.1, saveBinds)
-    end)
-
     print("====================================")
-    print("✅ Flunium Client v1.9 загружен!")
-    print("⚡ LDM больше не включает подтумблеры")
-    print("👁️ Remove Character Effects: полное удаление через Clear()")
-    print("👁️ ESP: AlwaysOnTop=true")
-    print("🎯 Aimbot 1 + Aimbot 2 + Silent Aim")
-    print("💾 Keybinds сохраняются в конфиг")
-    print("📌 RightControl - скрыть меню")
+    print("✅ Flunium Client v2.0 загружен!")
+    print("🎯 Aimbot + Kunai Mark Aimbot")
+    print("🎭 Silent Aim + Silent Aim Kunai Mark")
+    print("⚡ Performance оптимизирован")
+    print("📌 RightControl — скрыть меню")
     print("====================================")
 
     getgenv().FluniumLoaded = true
-
 end
 
 Flunium_Boot()
