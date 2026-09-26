@@ -1,9 +1,9 @@
 --[[
-    Flunium Client v2.7
-    ✅ Marker Tracker: целится в MAIN (точная точка маркера)
-    ✅ Kunai Snap: Head+Offset / Marker (точный) / Marker Projectile
-    ✅ NPC фильтр: Aim at NPCs
-    ✅ ESP / Overlay / Colors / Performance
+    Flunium Client v3.0
+    ✅ Overlay: Move Step slider + X/Y inputs
+    ✅ Kunai Snap: без уведомления, только по марке, FOV + 360 toggle
+    ✅ Kunai Mark Aimbot: только по марке, FOV + 360 toggle
+    ✅ Все настройки через tonumber (фикс "string < number")
 ]]
 
 local function Flunium_Boot()
@@ -18,7 +18,7 @@ local function Flunium_Boot()
         end
         if alive then
             pcall(function()
-                getgenv().FluniumFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium v2.7 уже работает", Duration = 3})
+                getgenv().FluniumFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium v3.0 уже работает", Duration = 3})
             end)
             return
         end
@@ -66,7 +66,9 @@ local function Flunium_Boot()
     local fireRemote
     pcall(function() fireRemote = ReplicatedStorage:WaitForChild("fire", 8) end)
 
+    -- ========== CONFIG ==========
     local settings = {
+        -- Aimbot 1
         fov = 300, smoothing = 0.15, prediction = 0.065,
         teamCheck = false, aimAtNPCs = false,
         aimPart = "HumanoidRootPart", aimMode = "Hold",
@@ -75,23 +77,39 @@ local function Flunium_Boot()
         mode360 = false,
         fovColor = Color3.fromRGB(255, 0, 0),
         targetedColor = Color3.fromRGB(0, 255, 0),
+        -- Kunai Mark Aimbot
         aim2Fov = 300, aim2Smoothing = 0.15, aim2Prediction = 0.065,
-        aim2TeamCheck = false, aim2AimAtNPCs = false,
+        aim2TeamCheck = false,
         aim2Mode = "Hold", aim2Key = Enum.KeyCode.One,
         aim2ListeningForBind = false, aim2ShowFovCircle = true,
         aim2MaxDistance = 0, aim2PrioritizeClose = true, aim2Mode360 = false,
-        aim2HeightOffset = 16,
+        aim2HeightOffset = 17,
+        aim2AimMode = "Marker",
         aim2FovColor = Color3.fromRGB(255, 165, 0),
         aim2TargetedColor = Color3.fromRGB(255, 255, 0),
+        -- Kunai Snap
         kunaiSnap = false,
         kunaiSnapKey = Enum.KeyCode.Two,
         kunaiSnapHeight = 17,
         kunaiSnapMaxDist = 0,
+        kunaiSnapFov = 300,
+        kunaiSnapShowFovCircle = true,
+        kunaiSnapPrioritizeClose = true,
+        kunaiSnapFovColor = Color3.fromRGB(150, 100, 255),
         kunaiSnapListening = false,
         kunaiSnapDelayMs = 50,
         kunaiSnapClickHoldMs = 60,
         kunaiSnapPostWaitMs = 30,
-        kunaiSnapAimMode = "Marker",  -- Head+Offset | Marker | Marker Projectile
+        kunaiSnapAimMode = "Marker",
+        kunaiSnapMode360 = false,
+        -- Overlay
+        overlayShowFps = true,
+        overlayShowPing = true,
+        overlaySize = 18,
+        overlayPosX = 20,
+        overlayPosY = 20,
+        overlayMoveStep = 100,
+        -- Visual
         xray = false, fullBright = false, nightVision = false,
         noShadows = false, noBloom = false, noSunRays = false, noFog = false
     }
@@ -145,39 +163,25 @@ local function Flunium_Boot()
     local kunaiSnapBusy = false
 
     -- ========== MARKER TRACKER ==========
-    -- Храним: targetRoot (HRP) → {projectile = weewoo, main = MAIN Part, time}
     local activeMarkers = {}
 
     local function extractMarkerData(projectile, targetRoot)
         if not projectile or not targetRoot then return nil end
-        -- MAIN — это точка маркера, приваренная к HRP с C0=(0,17,0)
         local main = nil
         local clickpart = projectile:FindFirstChild("clickpart")
-        if clickpart then
-            main = clickpart:FindFirstChild("MAIN")
-        end
+        if clickpart then main = clickpart:FindFirstChild("MAIN") end
         if not main then
-            -- fallback: ищем MAIN по всем потомкам
             for _, obj in ipairs(projectile:GetDescendants()) do
-                if obj:IsA("BasePart") and obj.Name == "MAIN" then
-                    main = obj
-                    break
-                end
+                if obj:IsA("BasePart") and obj.Name == "MAIN" then main = obj; break end
             end
         end
-        return {
-            projectile = projectile,
-            main = main,
-            time = tick()
-        }
+        return {projectile = projectile, main = main, time = tick()}
     end
 
     local function registerMarker(projectile, targetRoot)
         if not targetRoot or not targetRoot.Parent then return end
         local data = extractMarkerData(projectile, targetRoot)
-        if data then
-            activeMarkers[targetRoot] = data
-        end
+        if data then activeMarkers[targetRoot] = data end
     end
 
     local function cleanupMarkers()
@@ -187,49 +191,36 @@ local function Flunium_Boot()
                 and target.Parent:FindFirstChildOfClass("Humanoid").Health > 0
                 and data.projectile
                 and data.projectile.Parent
-            if not alive then
-                activeMarkers[target] = nil
-            end
+            if not alive then activeMarkers[target] = nil end
         end
-    end
-
-    local function getClosestMarkedTarget()
-        cleanupMarkers()
-        local myChar = LocalPlayer.Character
-        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        if not myRoot then return nil end
-        local closest, closestDist = nil, math.huge
-        for target, data in pairs(activeMarkers) do
-            if target.Parent then
-                local dist = (target.Position - myRoot.Position).Magnitude
-                if dist < closestDist then
-                    closestDist = dist
-                    closest = target
-                end
-            end
-        end
-        return closest
     end
 
     local function getMarkerAimPosition(targetRoot)
         local data = activeMarkers[targetRoot]
         if not data then return nil end
-        -- MAIN — приоритет
-        if data.main and data.main.Parent then
-            return data.main.Position
-        end
-        -- fallback: HRP + (0, 17, 0) (C0 weld'а)
-        if targetRoot.Parent then
-            return targetRoot.Position + Vector3.new(0, 17, 0)
-        end
+        if data.main and data.main.Parent then return data.main.Position end
+        if targetRoot.Parent then return targetRoot.Position + Vector3.new(0, 17, 0) end
         return nil
     end
 
     local function getMarkerProjectilePosition(targetRoot)
         local data = activeMarkers[targetRoot]
         if not data then return nil end
-        if data.projectile and data.projectile.Parent then
-            return data.projectile.Position
+        if data.projectile and data.projectile.Parent then return data.projectile.Position end
+        return nil
+    end
+
+    local function getMarkedAimPos(targetRoot, aimMode, heightOffset)
+        if not targetRoot then return nil end
+        local h = tonumber(heightOffset) or 17
+        if aimMode == "Marker" then
+            return getMarkerAimPosition(targetRoot)
+        elseif aimMode == "Marker Projectile" then
+            return getMarkerProjectilePosition(targetRoot)
+        elseif aimMode == "Head+Offset" then
+            local char = targetRoot.Parent
+            local head = char and char:FindFirstChild("Head")
+            if head then return head.Position + Vector3.new(0, h, 0) end
         end
         return nil
     end
@@ -252,36 +243,43 @@ local function Flunium_Boot()
         end)
     end
 
-    -- ========== FOV ==========
-    local fovCircle, fovCircle2, silentFovCircle
-    pcall(function()
-        fovCircle = Drawing.new("Circle")
-        fovCircle.Thickness = 2; fovCircle.Radius = settings.fov
-        fovCircle.Filled = false; fovCircle.Color = settings.fovColor
-        fovCircle.Transparency = 1; fovCircle.Visible = false
-    end)
-    pcall(function()
-        fovCircle2 = Drawing.new("Circle")
-        fovCircle2.Thickness = 2; fovCircle2.Radius = settings.aim2Fov
-        fovCircle2.Filled = false; fovCircle2.Color = settings.aim2FovColor
-        fovCircle2.Transparency = 1; fovCircle2.Visible = false
-    end)
-    pcall(function()
-        silentFovCircle = Drawing.new("Circle")
-        silentFovCircle.Thickness = 2; silentFovCircle.Radius = silentAim.FOV
-        silentFovCircle.Filled = false; silentFovCircle.Color = silentAim.FovColor
-        silentFovCircle.Transparency = 1; silentFovCircle.Visible = false
-    end)
+    -- ========== FOV CIRCLES ==========
+    local fovCircle, fovCircle2, silentFovCircle, kunaiSnapFovCircle
+    local function makeCircle(color, radius)
+        local c
+        pcall(function()
+            c = Drawing.new("Circle")
+            c.Thickness = 2
+            c.Radius = radius
+            c.Filled = false
+            c.Color = color
+            c.Transparency = 1
+            c.Visible = false
+        end)
+        return c
+    end
+    fovCircle = makeCircle(settings.fovColor, settings.fov)
+    fovCircle2 = makeCircle(settings.aim2FovColor, settings.aim2Fov)
+    silentFovCircle = makeCircle(silentAim.FovColor, silentAim.FOV)
+    kunaiSnapFovCircle = makeCircle(settings.kunaiSnapFovColor, settings.kunaiSnapFov)
+
+    -- ========== HELPERS ==========
+    local function numOr(v, default)
+        local n = tonumber(v)
+        if n == nil then return default end
+        return n
+    end
 
     local function isMaxDistOk(dist, maxDist)
-        if not maxDist or maxDist <= 0 or maxDist >= 5000 then return true end
-        return dist <= maxDist
+        local n = numOr(maxDist, 0)
+        if n <= 0 or n >= 5000 then return true end
+        return dist <= n
     end
 
     local function makeColorString(r, g, b)
-        r = math.clamp(tonumber(r) or 0, 0, 255)
-        g = math.clamp(tonumber(g) or 0, 0, 255)
-        b = math.clamp(tonumber(b) or 0, 0, 255)
+        r = math.clamp(numOr(r, 0), 0, 255)
+        g = math.clamp(numOr(g, 0), 0, 255)
+        b = math.clamp(numOr(b, 0), 0, 255)
         return string.format("%d,%d,%d", 255-r, 255-g, 255-b)
     end
     local function sendSkin(r, g, b)
@@ -293,7 +291,7 @@ local function Flunium_Boot()
     local function sendSkinColor(c) sendSkin(math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255)) end
     local function sendHairColor(c) sendHair(math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255)) end
 
-    -- ========== PERFORMANCE (сжато) ==========
+    -- ========== PERFORMANCE ==========
     local perfConnections = {}
     local function disconnectPerfConns()
         for _, c in ipairs(perfConnections) do pcall(function() c:Disconnect() end) end
@@ -554,7 +552,7 @@ local function Flunium_Boot()
     local espData, espConns, espAcc = {}, {}, 0
     local function getHumanoid(char) return char and char:FindFirstChildOfClass("Humanoid") end
     local function short(v)
-        v = math.floor(tonumber(v) or 0)
+        v = math.floor(numOr(v, 0))
         if v >= 1e6 then return string.format("%.1fM", v/1e6) end
         if v >= 1e3 then return string.format("%.1fK", v/1e3) end
         return tostring(v)
@@ -769,6 +767,7 @@ local function Flunium_Boot()
         local myChar = LocalPlayer.Character
         local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
         local originPos = myRoot and myRoot.Position or cam.CFrame.Position
+        local fovNum = numOr(silentAim.FOV, 500)
         for _, p in pairs(Players:GetPlayers()) do
             if p == LocalPlayer then continue end
             local char = p.Character
@@ -785,7 +784,7 @@ local function Flunium_Boot()
                 local pos, vis = cam:WorldToViewportPoint(part.Position)
                 if not vis then continue end
                 local sd = (Vector2.new(pos.X, pos.Y) - MousePos).Magnitude
-                if sd > silentAim.FOV then continue end
+                if sd > fovNum then continue end
                 local wd = (part.Position - originPos).Magnitude
                 local score = silentAim.PrioritizeClose and wd or sd
                 if score < bestScore then bestScore = score; best = part end
@@ -824,6 +823,7 @@ local function Flunium_Boot()
         local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
         if not myRoot then return nil end
         local originPos = myRoot.Position
+        local fovNum = numOr(settings.fov, 300)
         local bestT, bestS = nil, math.huge
         for _, p in ipairs(Players:GetPlayers()) do
             if p == LocalPlayer or isSameTeam(p, settings.teamCheck) then continue end
@@ -842,7 +842,7 @@ local function Flunium_Boot()
                 local sp, onScreen = Camera:WorldToViewportPoint(tp.Position)
                 if not onScreen then continue end
                 local cd = (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude
-                if cd > settings.fov then continue end
+                if cd > fovNum then continue end
                 local score = settings.prioritizeClose and wd or cd
                 if score < bestS then bestS = score; bestT = p end
             end
@@ -850,37 +850,66 @@ local function Flunium_Boot()
         return bestT
     end
 
+    -- ========== KUNAI MARK AIMBOT ==========
     local function getTarget2()
         local mousePos = UserInputService:GetMouseLocation()
         local myChar = LocalPlayer.Character
         local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
         if not myRoot then return nil end
         local originPos = myRoot.Position
-        local bestT, bestS = nil, math.huge
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p == LocalPlayer or isSameTeam(p, settings.aim2TeamCheck) then continue end
-            local char = p.Character
-            if not char then continue end
-            local hum = char:FindFirstChild("Humanoid")
-            if not hum or hum.Health <= 0 then continue end
-            local head = char:FindFirstChild("Head")
-            if not head then continue end
-            local aimPos = head.Position + Vector3.new(0, settings.aim2HeightOffset, 0)
-            local er = char:FindFirstChild("HumanoidRootPart")
-            if er and not isMaxDistOk((er.Position - originPos).Magnitude, settings.aim2MaxDistance) then continue end
+        local fovNum = numOr(settings.aim2Fov, 300)
+        local heightNum = numOr(settings.aim2HeightOffset, 17)
+
+        cleanupMarkers()
+
+        if settings.aim2AimMode == "Head+Offset" then
+            local bestT, bestS = nil, math.huge
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p == LocalPlayer or isSameTeam(p, settings.aim2TeamCheck) then continue end
+                local char = p.Character
+                if not char then continue end
+                local hum = char:FindFirstChild("Humanoid")
+                if not hum or hum.Health <= 0 then continue end
+                local head = char:FindFirstChild("Head")
+                if not head then continue end
+                local aimPos = head.Position + Vector3.new(0, heightNum, 0)
+                local er = char:FindFirstChild("HumanoidRootPart")
+                if er and not isMaxDistOk((er.Position - originPos).Magnitude, settings.aim2MaxDistance) then continue end
+                local wd = (aimPos - originPos).Magnitude
+                if settings.aim2Mode360 then
+                    if wd < bestS then bestS = wd; bestT = p end
+                else
+                    local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
+                    if not onScreen then continue end
+                    local cd = (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude
+                    if cd > fovNum then continue end
+                    local score = settings.aim2PrioritizeClose and wd or cd
+                    if score < bestS then bestS = score; bestT = p end
+                end
+            end
+            return bestT
+        end
+
+        -- только игроки с маркой
+        local bestRoot, bestScore = nil, math.huge
+        for targetRoot, data in pairs(activeMarkers) do
+            if not targetRoot.Parent then continue end
+            local aimPos = getMarkedAimPos(targetRoot, settings.aim2AimMode, heightNum)
+            if not aimPos then continue end
             local wd = (aimPos - originPos).Magnitude
+            if not isMaxDistOk(wd, settings.aim2MaxDistance) then continue end
             if settings.aim2Mode360 then
-                if wd < bestS then bestS = wd; bestT = p end
+                if wd < bestScore then bestScore = wd; bestRoot = targetRoot end
             else
                 local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
                 if not onScreen then continue end
                 local cd = (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude
-                if cd > settings.aim2Fov then continue end
+                if cd > fovNum then continue end
                 local score = settings.aim2PrioritizeClose and wd or cd
-                if score < bestS then bestS = score; bestT = p end
+                if score < bestScore then bestScore = score; bestRoot = targetRoot end
             end
         end
-        return bestT
+        return bestRoot
     end
 
     local function aimAtTarget(p)
@@ -893,15 +922,32 @@ local function Flunium_Boot()
         Camera.CFrame = cur:Lerp(CFrame.new(cur.Position, pos), math.clamp(1 - settings.smoothing, 0.05, 1))
     end
 
-    local function aimAtTarget2(p)
-        if not p or not p.Character then return end
-        local head = p.Character:FindFirstChild("Head")
-        if not head then return end
-        local rp = p.Character:FindFirstChild("HumanoidRootPart")
-        local aimPos = head.Position + Vector3.new(0, settings.aim2HeightOffset, 0)
-        local pos = aimPos + (rp and rp.Velocity * settings.aim2Prediction or Vector3.new())
-        local cur = Camera.CFrame
-        Camera.CFrame = cur:Lerp(CFrame.new(cur.Position, pos), math.clamp(1 - settings.aim2Smoothing, 0.05, 1))
+    local function aimAtTarget2(targetOrPlayer)
+        if not targetOrPlayer then return end
+        local smooth = numOr(settings.aim2Smoothing, 0.15)
+        local heightNum = numOr(settings.aim2HeightOffset, 17)
+
+        if typeof(targetOrPlayer) == "Instance" and targetOrPlayer:IsA("BasePart") then
+            local aimPos = getMarkedAimPos(targetOrPlayer, settings.aim2AimMode, heightNum)
+            if aimPos then
+                local cur = Camera.CFrame
+                Camera.CFrame = cur:Lerp(CFrame.new(cur.Position, aimPos), math.clamp(1 - smooth, 0.05, 1))
+            end
+            return
+        end
+
+        if typeof(targetOrPlayer) == "Instance" and targetOrPlayer:IsA("Player") then
+            local p = targetOrPlayer
+            local char = p.Character
+            if not char then return end
+            local head = char:FindFirstChild("Head")
+            if not head then return end
+            local rp = char:FindFirstChild("HumanoidRootPart")
+            local aimPos = head.Position + Vector3.new(0, heightNum, 0)
+            local pos = aimPos + (rp and rp.Velocity * settings.aim2Prediction or Vector3.new())
+            local cur = Camera.CFrame
+            Camera.CFrame = cur:Lerp(CFrame.new(cur.Position, pos), math.clamp(1 - smooth, 0.05, 1))
+        end
     end
 
     -- ========== KUNAI SNAP ==========
@@ -910,32 +956,35 @@ local function Flunium_Boot()
         local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
         if not myRoot then return nil end
 
-        if settings.kunaiSnapAimMode ~= "Head+Offset" then
-            local marked = getClosestMarkedTarget()
-            if marked and marked.Parent then
-                if settings.kunaiSnapAimMode == "Marker" then
-                    local pos = getMarkerAimPosition(marked)
-                    if pos then return pos end
-                elseif settings.kunaiSnapAimMode == "Marker Projectile" then
-                    local pos = getMarkerProjectilePosition(marked)
-                    if pos then return pos end
-                end
-            end
-        end
+        local mousePos = UserInputService:GetMouseLocation()
 
-        -- fallback: ближайший игрок Head+Offset
-        local best, bestDist = nil, math.huge
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p == LocalPlayer then continue end
-            local char = p.Character
-            if not char then continue end
-            local head = char:FindFirstChild("Head")
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if not head or not hum or hum.Health <= 0 then continue end
-            local aimPos = head.Position + Vector3.new(0, settings.kunaiSnapHeight, 0)
-            local dist = (aimPos - myRoot.Position).Magnitude
-            if not isMaxDistOk(dist, settings.kunaiSnapMaxDist) then continue end
-            if dist < bestDist then bestDist = dist; best = aimPos end
+        cleanupMarkers()
+
+        local fovNum = numOr(settings.kunaiSnapFov, 300)
+        local maxDistNum = numOr(settings.kunaiSnapMaxDist, 0)
+        local heightNum = numOr(settings.kunaiSnapHeight, 17)
+
+        local best, bestScore = nil, math.huge
+        for targetRoot, data in pairs(activeMarkers) do
+            if not targetRoot.Parent then continue end
+            local aimPos = getMarkedAimPos(targetRoot, settings.kunaiSnapAimMode, heightNum)
+            if not aimPos then continue end
+            local wd = (aimPos - myRoot.Position).Magnitude
+
+            if maxDistNum > 0 and maxDistNum < 5000 then
+                if wd > maxDistNum then continue end
+            end
+
+            if settings.kunaiSnapMode360 then
+                if wd < bestScore then bestScore = wd; best = aimPos end
+            else
+                local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
+                if not onScreen then continue end
+                local sd = (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude
+                if sd > fovNum then continue end
+                local score = settings.kunaiSnapPrioritizeClose and wd or sd
+                if score < bestScore then bestScore = score; best = aimPos end
+            end
         end
         return best
     end
@@ -943,10 +992,7 @@ local function Flunium_Boot()
     local function kunaiSnapPerform()
         if kunaiSnapBusy then return end
         local target = getKunaiSnapTarget()
-        if not target then
-            Fluent:Notify({Title = "🌀 Kunai Snap", Content = "Цель не найдена", Duration = 2})
-            return
-        end
+        if not target then return end
 
         local char = LocalPlayer.Character
         local myRoot = char and char:FindFirstChild("HumanoidRootPart")
@@ -963,7 +1009,11 @@ local function Flunium_Boot()
         local dir = (target - origin)
         local snapCFrame = CFrame.lookAt(origin, origin + dir.Unit)
 
-        local delayEnd = tick() + (settings.kunaiSnapDelayMs / 1000)
+        local delayMs = numOr(settings.kunaiSnapDelayMs, 50)
+        local holdMs = numOr(settings.kunaiSnapClickHoldMs, 60)
+        local postMs = numOr(settings.kunaiSnapPostWaitMs, 30)
+
+        local delayEnd = tick() + (delayMs / 1000)
         while tick() < delayEnd do
             Camera.CFrame = snapCFrame
             RunService.RenderStepped:Wait()
@@ -971,11 +1021,11 @@ local function Flunium_Boot()
 
         pcall(function()
             VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-            task.wait(settings.kunaiSnapClickHoldMs / 1000)
+            task.wait(holdMs / 1000)
             VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
         end)
 
-        local postEnd = tick() + (settings.kunaiSnapPostWaitMs / 1000)
+        local postEnd = tick() + (postMs / 1000)
         while tick() < postEnd do
             Camera.CFrame = snapCFrame
             RunService.RenderStepped:Wait()
@@ -1059,7 +1109,7 @@ local function Flunium_Boot()
 
     -- ========== GUI ==========
     local Window = Fluent:CreateWindow({
-        Title = "Flunium Client v2.7",
+        Title = "Flunium Client v3.0",
         SubTitle = "",
         TabWidth = 160,
         Size = UDim2.fromOffset(620, 540),
@@ -1110,28 +1160,34 @@ local function Flunium_Boot()
         end
     })
     Tabs.Aimbot:AddSlider("FOV", {Title = "FOV", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(v)
-        settings.fov = v; if fovCircle then fovCircle.Radius = v end
+        settings.fov = numOr(v, 300); if fovCircle then fovCircle.Radius = settings.fov end
     end)
-    Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 100}):OnChanged(function(v) settings.maxDistance = v end)
+    Tabs.Aimbot:AddSlider("MaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 100}):OnChanged(function(v) settings.maxDistance = numOr(v, 0) end)
     Tabs.Aimbot:AddToggle("PriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) settings.prioritizeClose = v end)
     Tabs.Aimbot:AddToggle("Mode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
         settings.mode360 = v
         if v and fovCircle then fovCircle.Visible = false end
     end)
-    Tabs.Aimbot:AddSlider("Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v) settings.smoothing = v / 100 end)
-    Tabs.Aimbot:AddSlider("Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v) settings.prediction = v / 100 end)
+    Tabs.Aimbot:AddSlider("Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v) settings.smoothing = numOr(v, 15) / 100 end)
+    Tabs.Aimbot:AddSlider("Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v) settings.prediction = numOr(v, 6) / 100 end)
     Tabs.Aimbot:AddToggle("AimNPCs", {Title = "Aim at NPCs", Default = false}):OnChanged(function(v) settings.aimAtNPCs = v end)
 
     -- KUNAI MARK AIMBOT
     Tabs.Kunai:AddToggle("Aim2On", {Title = "Enable Kunai Mark Aimbot", Default = false}):OnChanged(function(v)
         aim2Enabled = v
-        if fovCircle2 then fovCircle2.Visible = settings.aim2ShowFovCircle and v and not settings.aim2Mode360 end
+        if fovCircle2 then fovCircle2.Visible = settings.aim2ShowFovCircle and v and not settings.aim2Mode360 and settings.aim2AimMode ~= "Head+Offset" end
         if not v then aim2ing = false; aim2Target = nil end
     end)
     Tabs.Kunai:AddToggle("Aim2ShowFOV", {Title = "Show FOV", Default = true}):OnChanged(function(v)
         settings.aim2ShowFovCircle = v
         if fovCircle2 then fovCircle2.Visible = v and aim2Enabled and not settings.aim2Mode360 end
     end)
+    Tabs.Kunai:AddColorpicker("Aim2FovColor", {Title = "FOV Color", Default = Color3.fromRGB(255, 165, 0)}):OnChanged(function(c)
+        settings.aim2FovColor = c; if fovCircle2 then fovCircle2.Color = c end
+    end)
+    Tabs.Kunai:AddDropdown("Aim2AimMode", {Title = "Aim Mode",
+        Values = {"Marker", "Marker Projectile", "Head+Offset"}, Default = 1
+    }):OnChanged(function(v) settings.aim2AimMode = v end)
     Tabs.Kunai:AddDropdown("Aim2Mode", {Title = "Mode",
         Values = {"Hold", "Toggle"}, Default = 1
     }):OnChanged(function(v) settings.aim2Mode = v end)
@@ -1143,24 +1199,26 @@ local function Flunium_Boot()
             pcall(function() aim2BindButton:SetTitle("Нажми клавишу...") end)
         end
     })
-    Tabs.Kunai:AddSlider("Aim2Height", {Title = "Height Above Head", Default = 17, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) settings.aim2HeightOffset = v end)
+    Tabs.Kunai:AddSlider("Aim2Height", {Title = "Height Above Head (fallback)", Default = 17, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) settings.aim2HeightOffset = numOr(v, 17) end)
     Tabs.Kunai:AddSlider("Aim2FOV", {Title = "FOV", Default = 300, Min = 0, Max = 800, Rounding = 0}):OnChanged(function(v)
-        settings.aim2Fov = v; if fovCircle2 then fovCircle2.Radius = v end
+        settings.aim2Fov = numOr(v, 300); if fovCircle2 then fovCircle2.Radius = settings.aim2Fov end
     end)
-    Tabs.Kunai:AddSlider("Aim2MaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 100}):OnChanged(function(v) settings.aim2MaxDistance = v end)
+    Tabs.Kunai:AddSlider("Aim2MaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 100}):OnChanged(function(v) settings.aim2MaxDistance = numOr(v, 0) end)
     Tabs.Kunai:AddToggle("Aim2PriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) settings.aim2PrioritizeClose = v end)
     Tabs.Kunai:AddToggle("Aim2Mode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
         settings.aim2Mode360 = v
         if v and fovCircle2 then fovCircle2.Visible = false end
     end)
-    Tabs.Kunai:AddSlider("Aim2Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v) settings.aim2Smoothing = v / 100 end)
-    Tabs.Kunai:AddSlider("Aim2Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v) settings.aim2Prediction = v / 100 end)
-    Tabs.Kunai:AddToggle("Aim2NPCs", {Title = "Aim at NPCs", Default = false}):OnChanged(function(v) settings.aim2AimAtNPCs = v end)
+    Tabs.Kunai:AddSlider("Aim2Smooth", {Title = "Smoothing", Default = 15, Min = 0, Max = 100, Rounding = 0}):OnChanged(function(v) settings.aim2Smoothing = numOr(v, 15) / 100 end)
+    Tabs.Kunai:AddSlider("Aim2Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v) settings.aim2Prediction = numOr(v, 6) / 100 end)
 
     -- KUNAI SNAP
     Tabs.Kunai:AddSection("Kunai Mark Snap")
     Tabs.Kunai:AddToggle("KunaiSnapOn", {Title = "Enable Kunai Mark Snap", Default = false}):OnChanged(function(v)
         settings.kunaiSnap = v
+        if kunaiSnapFovCircle then
+            kunaiSnapFovCircle.Visible = v and settings.kunaiSnapShowFovCircle and not settings.kunaiSnapMode360
+        end
     end)
     local kunaiSnapBindBtn
     kunaiSnapBindBtn = Tabs.Kunai:AddButton({
@@ -1173,11 +1231,30 @@ local function Flunium_Boot()
     Tabs.Kunai:AddDropdown("KunaiSnapAimMode", {Title = "Aim Mode",
         Values = {"Marker", "Marker Projectile", "Head+Offset"}, Default = 1
     }):OnChanged(function(v) settings.kunaiSnapAimMode = v end)
-    Tabs.Kunai:AddSlider("KunaiSnapHeight", {Title = "Height Above Head (fallback)", Default = 17, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) settings.kunaiSnapHeight = v end)
-    Tabs.Kunai:AddSlider("KunaiSnapMaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 100}):OnChanged(function(v) settings.kunaiSnapMaxDist = v end)
-    Tabs.Kunai:AddSlider("KunaiSnapDelay", {Title = "Snap Delay (ms)", Default = 50, Min = 10, Max = 300, Rounding = 5}):OnChanged(function(v) settings.kunaiSnapDelayMs = v end)
-    Tabs.Kunai:AddSlider("KunaiSnapClickHold", {Title = "Click Hold (ms)", Default = 60, Min = 10, Max = 300, Rounding = 5}):OnChanged(function(v) settings.kunaiSnapClickHoldMs = v end)
-    Tabs.Kunai:AddSlider("KunaiSnapPostWait", {Title = "Post-Click Wait (ms)", Default = 30, Min = 0, Max = 200, Rounding = 5}):OnChanged(function(v) settings.kunaiSnapPostWaitMs = v end)
+    Tabs.Kunai:AddToggle("KunaiSnapShowFov", {Title = "Show FOV Circle", Default = true}):OnChanged(function(v)
+        settings.kunaiSnapShowFovCircle = v
+        if kunaiSnapFovCircle then
+            kunaiSnapFovCircle.Visible = v and settings.kunaiSnap and not settings.kunaiSnapMode360
+        end
+    end)
+    Tabs.Kunai:AddColorpicker("KunaiSnapFovColor", {Title = "FOV Color", Default = Color3.fromRGB(150, 100, 255)}):OnChanged(function(c)
+        settings.kunaiSnapFovColor = c
+        if kunaiSnapFovCircle then kunaiSnapFovCircle.Color = c end
+    end)
+    Tabs.Kunai:AddSlider("KunaiSnapFov", {Title = "FOV Radius", Default = 300, Min = 50, Max = 2000, Rounding = 10}):OnChanged(function(v)
+        settings.kunaiSnapFov = numOr(v, 300)
+        if kunaiSnapFovCircle then kunaiSnapFovCircle.Radius = settings.kunaiSnapFov end
+    end)
+    Tabs.Kunai:AddToggle("KunaiSnapPriorClose", {Title = "Prioritize Close", Default = true}):OnChanged(function(v) settings.kunaiSnapPrioritizeClose = v end)
+    Tabs.Kunai:AddToggle("KunaiSnapMode360", {Title = "360° Mode", Default = false}):OnChanged(function(v)
+        settings.kunaiSnapMode360 = v
+        if v and kunaiSnapFovCircle then kunaiSnapFovCircle.Visible = false end
+    end)
+    Tabs.Kunai:AddSlider("KunaiSnapHeight", {Title = "Height Above Head (fallback)", Default = 17, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) settings.kunaiSnapHeight = numOr(v, 17) end)
+    Tabs.Kunai:AddSlider("KunaiSnapMaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 100}):OnChanged(function(v) settings.kunaiSnapMaxDist = numOr(v, 0) end)
+    Tabs.Kunai:AddSlider("KunaiSnapDelay", {Title = "Snap Delay (ms)", Default = 50, Min = 10, Max = 300, Rounding = 5}):OnChanged(function(v) settings.kunaiSnapDelayMs = numOr(v, 50) end)
+    Tabs.Kunai:AddSlider("KunaiSnapClickHold", {Title = "Click Hold (ms)", Default = 60, Min = 10, Max = 300, Rounding = 5}):OnChanged(function(v) settings.kunaiSnapClickHoldMs = numOr(v, 60) end)
+    Tabs.Kunai:AddSlider("KunaiSnapPostWait", {Title = "Post-Click Wait (ms)", Default = 30, Min = 0, Max = 200, Rounding = 5}):OnChanged(function(v) settings.kunaiSnapPostWaitMs = numOr(v, 30) end)
 
     -- SILENT AIM
     Tabs.Silent:AddToggle("SilentMaster", {Title = "Enable Silent Aim", Default = false}):OnChanged(function(v)
@@ -1197,10 +1274,10 @@ local function Flunium_Boot()
         end
     })
     Tabs.Silent:AddSlider("SilentFOV", {Title = "FOV", Default = 500, Min = 50, Max = 2000, Rounding = 0}):OnChanged(function(v)
-        silentAim.FOV = v; if silentFovCircle then silentFovCircle.Radius = v end
+        silentAim.FOV = numOr(v, 500); if silentFovCircle then silentFovCircle.Radius = silentAim.FOV end
     end)
-    Tabs.Silent:AddSlider("SilentPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) silentAim.Prediction = v / 100 end)
-    Tabs.Silent:AddSlider("SilentMaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 100}):OnChanged(function(v) silentAim.MaxDistance = v end)
+    Tabs.Silent:AddSlider("SilentPred", {Title = "Prediction", Default = 19, Min = 0, Max = 50, Rounding = 0}):OnChanged(function(v) silentAim.Prediction = numOr(v, 19) / 100 end)
+    Tabs.Silent:AddSlider("SilentMaxDist", {Title = "Max Distance", Default = 0, Min = 0, Max = 5000, Rounding = 100}):OnChanged(function(v) silentAim.MaxDistance = numOr(v, 0) end)
     Tabs.Silent:AddToggle("SilentMode360", {Title = "360° Mode", Default = false}):OnChanged(function(v) silentAim.Mode360 = v end)
 
     -- ESP
@@ -1219,13 +1296,13 @@ local function Flunium_Boot()
     Tabs.ESP:AddToggle("EspHP", {Title = "HP", Default = true}):OnChanged(function(v) ESP.ShowHP = v; rebuildESP() end)
     Tabs.ESP:AddToggle("EspMD", {Title = "MD", Default = true}):OnChanged(function(v) ESP.ShowMD = v; rebuildESP() end)
     Tabs.ESP:AddToggle("EspDodge", {Title = "Body Dodge", Default = true}):OnChanged(function(v) ESP.ShowDodge = v; rebuildESP() end)
-    Tabs.ESP:AddSlider("EspSize", {Title = "Size", Default = 100, Min = 30, Max = 300, Rounding = 0}):OnChanged(function(v) ESP.Size = v / 100 end)
+    Tabs.ESP:AddSlider("EspSize", {Title = "Size", Default = 100, Min = 30, Max = 300, Rounding = 0}):OnChanged(function(v) ESP.Size = numOr(v, 100) / 100 end)
 
     -- COLORS
     Tabs.Colors:AddToggle("RainbowSkin", {Title = "Rainbow Skin", Default = false}):OnChanged(function(v) colors.RainbowSkin = v end)
     Tabs.Colors:AddToggle("RainbowHair", {Title = "Rainbow Hair", Default = false}):OnChanged(function(v) colors.RainbowHair = v end)
-    Tabs.Colors:AddSlider("SkinSpd", {Title = "Skin Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v) colors.SkinSpeed = v / 10 end)
-    Tabs.Colors:AddSlider("HairSpd", {Title = "Hair Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v) colors.HairSpeed = v / 10 end)
+    Tabs.Colors:AddSlider("SkinSpd", {Title = "Skin Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v) colors.SkinSpeed = numOr(v, 5) / 10 end)
+    Tabs.Colors:AddSlider("HairSpd", {Title = "Hair Speed", Default = 5, Min = 1, Max = 30, Rounding = 0}):OnChanged(function(v) colors.HairSpeed = numOr(v, 5) / 10 end)
 
     local colorPresets = {
         {name = "🔴 Красный", r=255, g=0, b=0},
@@ -1253,9 +1330,9 @@ local function Flunium_Boot()
     Tabs.Colors:AddButton({
         Title = "Применить кастомные волосы",
         Callback = function()
-            sendHair(tonumber(Options.CustomHairR.Value) or 255,
-                     tonumber(Options.CustomHairG.Value) or 0,
-                     tonumber(Options.CustomHairB.Value) or 0)
+            sendHair(numOr(Options.CustomHairR.Value, 255),
+                     numOr(Options.CustomHairG.Value, 0),
+                     numOr(Options.CustomHairB.Value, 0))
         end
     })
     Tabs.Colors:AddInput("CustomSkinR", {Title = "Skin R", Default = "255", Numeric = true})
@@ -1264,9 +1341,9 @@ local function Flunium_Boot()
     Tabs.Colors:AddButton({
         Title = "Применить кастомный скин",
         Callback = function()
-            sendSkin(tonumber(Options.CustomSkinR.Value) or 255,
-                     tonumber(Options.CustomSkinG.Value) or 0,
-                     tonumber(Options.CustomSkinB.Value) or 0)
+            sendSkin(numOr(Options.CustomSkinR.Value, 255),
+                     numOr(Options.CustomSkinG.Value, 0),
+                     numOr(Options.CustomSkinB.Value, 0))
         end
     })
 
@@ -1299,8 +1376,8 @@ local function Flunium_Boot()
     Tabs.Performance:AddSection("FPS")
     Tabs.Performance:AddToggle("FpsUnlock", {Title = "Unlock FPS Cap", Default = false}):OnChanged(applyFpsUnlock)
     Tabs.Performance:AddSlider("FpsCap", {Title = "FPS Cap", Default = 999, Min = 30, Max = 999, Rounding = 0}):OnChanged(function(v)
-        perf.fpsCap = v
-        if perf.fpsUnlock then pcall(function() setfpscap(v) end) end
+        perf.fpsCap = numOr(v, 999)
+        if perf.fpsUnlock then pcall(function() setfpscap(perf.fpsCap) end) end
     end)
 
     -- SERVER
@@ -1385,7 +1462,7 @@ local function Flunium_Boot()
         end
     end)
 
-    -- OVERLAY
+    -- ========== OVERLAY ==========
     local overlayGui = Instance.new("ScreenGui")
     overlayGui.Name = "FluniumOverlay"
     overlayGui.ResetOnSpawn = false
@@ -1394,7 +1471,7 @@ local function Flunium_Boot()
 
     local overlayFrame = Instance.new("Frame", overlayGui)
     overlayFrame.Size = UDim2.new(0, 220, 0, 60)
-    overlayFrame.Position = UDim2.new(0, 20, 0, 20)
+    overlayFrame.Position = UDim2.new(0, settings.overlayPosX, 0, settings.overlayPosY)
     overlayFrame.BackgroundTransparency = 1
 
     local fpsLabel = Instance.new("TextLabel", overlayFrame)
@@ -1420,7 +1497,10 @@ local function Flunium_Boot()
     pingLabel.TextXAlignment = Enum.TextXAlignment.Left
     pingLabel.Text = "PING: ..."
 
-    local overlay = {showFps = true, showPing = true, size = 18}
+    local function updateOverlayPosition()
+        overlayFrame.Position = UDim2.new(0, settings.overlayPosX, 0, settings.overlayPosY)
+    end
+
     local fpsCounter, fpsTimer, currentFps, currentPing = 0, 0, 0, 0
 
     RunService.RenderStepped:Connect(function(dt)
@@ -1432,18 +1512,18 @@ local function Flunium_Boot()
                 fpsCounter = 0
                 fpsTimer = 0
             end
-            if overlay.showFps then
+            if settings.overlayShowFps then
                 fpsLabel.Visible = true
                 fpsLabel.Text = "FPS: " .. currentFps
-                fpsLabel.TextSize = overlay.size
+                fpsLabel.TextSize = settings.overlaySize
             else
                 fpsLabel.Visible = false
             end
-            if overlay.showPing then
+            if settings.overlayShowPing then
                 pingLabel.Visible = true
                 local emoji = currentPing < 100 and "🟢" or (currentPing < 200 and "🟡" or "🔴")
                 pingLabel.Text = "PING: " .. emoji .. " " .. currentPing .. " ms"
-                pingLabel.TextSize = overlay.size
+                pingLabel.TextSize = settings.overlaySize
             else
                 pingLabel.Visible = false
             end
@@ -1456,28 +1536,81 @@ local function Flunium_Boot()
         end
     end)
 
-    Tabs.Overlay:AddToggle("OverlayFPS", {Title = "Show FPS (Shift+F5)", Default = true}):OnChanged(function(v) overlay.showFps = v end)
-    Tabs.Overlay:AddToggle("OverlayPing", {Title = "Show Ping (Shift+F3)", Default = true}):OnChanged(function(v) overlay.showPing = v end)
-    Tabs.Overlay:AddSlider("OverlaySize", {Title = "Size", Default = 18, Min = 10, Max = 40, Rounding = 0}):OnChanged(function(v) overlay.size = v end)
-    Tabs.Overlay:AddDropdown("OverlayPos", {Title = "Position",
-        Values = {"TopLeft", "TopRight", "BottomLeft", "BottomRight"}, Default = 1
-    }):OnChanged(function(v)
-        if v == "TopLeft" then overlayFrame.Position = UDim2.new(0, 20, 0, 20)
-        elseif v == "TopRight" then overlayFrame.Position = UDim2.new(1, -240, 0, 20)
-        elseif v == "BottomLeft" then overlayFrame.Position = UDim2.new(0, 20, 1, -80)
-        elseif v == "BottomRight" then overlayFrame.Position = UDim2.new(1, -240, 1, -80) end
+    Tabs.Overlay:AddToggle("OverlayFPS", {Title = "Show FPS (Shift+F5)", Default = true}):OnChanged(function(v) settings.overlayShowFps = v end)
+    Tabs.Overlay:AddToggle("OverlayPing", {Title = "Show Ping (Shift+F3)", Default = true}):OnChanged(function(v) settings.overlayShowPing = v end)
+    Tabs.Overlay:AddSlider("OverlaySize", {Title = "Size", Default = 18, Min = 10, Max = 40, Rounding = 0}):OnChanged(function(v) settings.overlaySize = numOr(v, 18) end)
+
+    Tabs.Overlay:AddSection("Position")
+    Tabs.Overlay:AddInput("OverlayPosX", {Title = "X coordinate (px)", Default = "20", Numeric = true}):OnChanged(function(v)
+        local n = numOr(v, 20)
+        settings.overlayPosX = n
+        updateOverlayPosition()
     end)
+    Tabs.Overlay:AddInput("OverlayPosY", {Title = "Y coordinate (px)", Default = "20", Numeric = true}):OnChanged(function(v)
+        local n = numOr(v, 20)
+        settings.overlayPosY = n
+        updateOverlayPosition()
+    end)
+    Tabs.Overlay:AddSlider("OverlayMoveStep", {Title = "Move Step (px)", Default = 100, Min = 1, Max = 500, Rounding = 1}):OnChanged(function(v)
+        settings.overlayMoveStep = numOr(v, 100)
+    end)
+    Tabs.Overlay:AddButton({
+        Title = "⬆ Вверх",
+        Callback = function()
+            local step = numOr(settings.overlayMoveStep, 100)
+            settings.overlayPosY = math.max(0, settings.overlayPosY - step)
+            updateOverlayPosition()
+            pcall(function() Options.OverlayPosY:SetValue(tostring(settings.overlayPosY)) end)
+        end
+    })
+    Tabs.Overlay:AddButton({
+        Title = "⬇ Вниз",
+        Callback = function()
+            local step = numOr(settings.overlayMoveStep, 100)
+            settings.overlayPosY = settings.overlayPosY + step
+            updateOverlayPosition()
+            pcall(function() Options.OverlayPosY:SetValue(tostring(settings.overlayPosY)) end)
+        end
+    })
+    Tabs.Overlay:AddButton({
+        Title = "⬅ Влево",
+        Callback = function()
+            local step = numOr(settings.overlayMoveStep, 100)
+            settings.overlayPosX = math.max(0, settings.overlayPosX - step)
+            updateOverlayPosition()
+            pcall(function() Options.OverlayPosX:SetValue(tostring(settings.overlayPosX)) end)
+        end
+    })
+    Tabs.Overlay:AddButton({
+        Title = "➡ Вправо",
+        Callback = function()
+            local step = numOr(settings.overlayMoveStep, 100)
+            settings.overlayPosX = settings.overlayPosX + step
+            updateOverlayPosition()
+            pcall(function() Options.OverlayPosX:SetValue(tostring(settings.overlayPosX)) end)
+        end
+    })
+    Tabs.Overlay:AddButton({
+        Title = "🔄 Сброс (20, 20)",
+        Callback = function()
+            settings.overlayPosX = 20
+            settings.overlayPosY = 20
+            updateOverlayPosition()
+            pcall(function() Options.OverlayPosX:SetValue("20") end)
+            pcall(function() Options.OverlayPosY:SetValue("20") end)
+        end
+    })
 
     -- INPUT
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
 
         if input.KeyCode == Enum.KeyCode.F5 and UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-            overlay.showFps = not overlay.showFps
+            settings.overlayShowFps = not settings.overlayShowFps
             return
         end
         if input.KeyCode == Enum.KeyCode.F3 and UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-            overlay.showPing = not overlay.showPing
+            settings.overlayShowPing = not settings.overlayShowPing
             return
         end
 
@@ -1543,20 +1676,33 @@ local function Flunium_Boot()
             aim2ing = UserInputService:IsKeyDown(settings.aim2Key)
         end
         local mpos = UserInputService:GetMouseLocation()
+
         if aimbotEnabled and fovCircle and settings.showFovCircle and not settings.mode360 then
             fovCircle.Position = Vector2.new(mpos.X, mpos.Y + 50)
             fovCircle.Visible = true
             fovCircle.Color = aiming and currentTarget and settings.targetedColor or settings.fovColor
         elseif fovCircle then fovCircle.Visible = false end
-        if aim2Enabled and fovCircle2 and settings.aim2ShowFovCircle and not settings.aim2Mode360 then
+
+        if aim2Enabled and fovCircle2 and settings.aim2ShowFovCircle and not settings.aim2Mode360
+           and settings.aim2AimMode ~= "Head+Offset" then
             fovCircle2.Position = Vector2.new(mpos.X, mpos.Y + 50)
             fovCircle2.Visible = true
             fovCircle2.Color = aim2ing and aim2Target and settings.aim2TargetedColor or settings.aim2FovColor
         elseif fovCircle2 then fovCircle2.Visible = false end
+
         if silentAim.MasterEnabled and silentFovCircle and silentAim.ShowFovCircle and not silentAim.Mode360 then
             silentFovCircle.Position = Vector2.new(mpos.X, mpos.Y + 50)
             silentFovCircle.Visible = silentAim.Enabled
         elseif silentFovCircle then silentFovCircle.Visible = false end
+
+        if settings.kunaiSnap and kunaiSnapFovCircle and settings.kunaiSnapShowFovCircle and not settings.kunaiSnapMode360 then
+            kunaiSnapFovCircle.Position = Vector2.new(mpos.X, mpos.Y + 50)
+            kunaiSnapFovCircle.Radius = settings.kunaiSnapFov
+            kunaiSnapFovCircle.Color = settings.kunaiSnapFovColor
+            kunaiSnapFovCircle.Visible = true
+        elseif kunaiSnapFovCircle then
+            kunaiSnapFovCircle.Visible = false
+        end
 
         if aiming then
             local t = tick()
@@ -1612,9 +1758,10 @@ local function Flunium_Boot()
     end)
 
     print("====================================")
-    print("✅ Flunium Client v2.7 загружен")
-    print("🌀 Marker Tracker: targets MAIN (точная точка маркера)")
-    print("🎯 Kunai Snap: Marker / Marker Projectile / Head+Offset")
+    print("✅ Flunium Client v3.0 загружен")
+    print("📊 Overlay: Move Step slider + X/Y inputs")
+    print("🎯 Kunai Mark Aimbot: только игроки с маркой")
+    print("🌀 Kunai Snap: FOV + 360 toggle, без уведомлений")
     print("📌 RightControl — скрыть меню")
     print("====================================")
 
