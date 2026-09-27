@@ -1,9 +1,10 @@
 --[[
-    Flunium Client v3.0
+    Flunium Client v3.1
+    ✅ Бинды: сохранение в FluniumClient/binds.json + SaveManager hook
+    ✅ Марки: игнорируются на LocalPlayer
+    ✅ Kunai Snap: без уведомлений, FOV + 360 toggle
     ✅ Overlay: Move Step slider + X/Y inputs
-    ✅ Kunai Snap: без уведомления, только по марке, FOV + 360 toggle
-    ✅ Kunai Mark Aimbot: только по марке, FOV + 360 toggle
-    ✅ Все настройки через tonumber (фикс "string < number")
+    ✅ Все настройки через numOr (фикс "string < number")
 ]]
 
 local function Flunium_Boot()
@@ -18,7 +19,7 @@ local function Flunium_Boot()
         end
         if alive then
             pcall(function()
-                getgenv().FluniumFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium v3.0 уже работает", Duration = 3})
+                getgenv().FluniumFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium v3.1 уже работает", Duration = 3})
             end)
             return
         end
@@ -68,7 +69,6 @@ local function Flunium_Boot()
 
     -- ========== CONFIG ==========
     local settings = {
-        -- Aimbot 1
         fov = 300, smoothing = 0.15, prediction = 0.065,
         teamCheck = false, aimAtNPCs = false,
         aimPart = "HumanoidRootPart", aimMode = "Hold",
@@ -77,7 +77,6 @@ local function Flunium_Boot()
         mode360 = false,
         fovColor = Color3.fromRGB(255, 0, 0),
         targetedColor = Color3.fromRGB(0, 255, 0),
-        -- Kunai Mark Aimbot
         aim2Fov = 300, aim2Smoothing = 0.15, aim2Prediction = 0.065,
         aim2TeamCheck = false,
         aim2Mode = "Hold", aim2Key = Enum.KeyCode.One,
@@ -87,7 +86,6 @@ local function Flunium_Boot()
         aim2AimMode = "Marker",
         aim2FovColor = Color3.fromRGB(255, 165, 0),
         aim2TargetedColor = Color3.fromRGB(255, 255, 0),
-        -- Kunai Snap
         kunaiSnap = false,
         kunaiSnapKey = Enum.KeyCode.Two,
         kunaiSnapHeight = 17,
@@ -102,14 +100,12 @@ local function Flunium_Boot()
         kunaiSnapPostWaitMs = 30,
         kunaiSnapAimMode = "Marker",
         kunaiSnapMode360 = false,
-        -- Overlay
         overlayShowFps = true,
         overlayShowPing = true,
         overlaySize = 18,
         overlayPosX = 20,
         overlayPosY = 20,
         overlayMoveStep = 100,
-        -- Visual
         xray = false, fullBright = false, nightVision = false,
         noShadows = false, noBloom = false, noSunRays = false, noFog = false
     }
@@ -233,9 +229,17 @@ local function Flunium_Boot()
                 local targetRoot = args[2][2]
                 if typeof(targetRoot) == "Instance" and targetRoot:IsA("BasePart") then
                     local parent = targetRoot.Parent
+                    -- игнорируем марки на себе
+                    if parent == LocalPlayer.Character then return end
+                    if parent == LocalPlayer then return end
+
                     local plr = Players:GetPlayerFromCharacter(parent)
                     local isNpc = (plr == nil) and parent:FindFirstChildOfClass("Humanoid") ~= nil
-                    if plr or (isNpc and settings.aimAtNPCs) then
+
+                    if plr then
+                        if plr == LocalPlayer then return end
+                        registerMarker(projectile, targetRoot)
+                    elseif isNpc and settings.aimAtNPCs then
                         registerMarker(projectile, targetRoot)
                     end
                 end
@@ -890,7 +894,6 @@ local function Flunium_Boot()
             return bestT
         end
 
-        -- только игроки с маркой
         local bestRoot, bestScore = nil, math.huge
         for targetRoot, data in pairs(activeMarkers) do
             if not targetRoot.Parent then continue end
@@ -957,7 +960,6 @@ local function Flunium_Boot()
         if not myRoot then return nil end
 
         local mousePos = UserInputService:GetMouseLocation()
-
         cleanupMarkers()
 
         local fovNum = numOr(settings.kunaiSnapFov, 300)
@@ -1109,7 +1111,7 @@ local function Flunium_Boot()
 
     -- ========== GUI ==========
     local Window = Fluent:CreateWindow({
-        Title = "Flunium Client v3.0",
+        Title = "Flunium Client v3.1",
         SubTitle = "",
         TabWidth = 160,
         Size = UDim2.fromOffset(620, 540),
@@ -1131,6 +1133,45 @@ local function Flunium_Boot()
     }
 
     local Options = Fluent.Options
+
+    -- ========== BIND PERSISTENCE ==========
+    local bindsFile = "FluniumClient/binds.json"
+
+    local function saveBinds()
+        pcall(function()
+            if not writefile then return end
+            if makefolder and not isfolder("FluniumClient") then
+                pcall(function() makefolder("FluniumClient") end)
+            end
+            local data = {
+                aimKey = settings.aimKey.Name,
+                aim2Key = settings.aim2Key.Name,
+                silentKey = silentAim.HoldKey.Name,
+                kunaiSnapKey = settings.kunaiSnapKey.Name,
+            }
+            writefile(bindsFile, HttpService:JSONEncode(data))
+        end)
+    end
+
+    local function loadBinds()
+        pcall(function()
+            if not (isfile and isfile(bindsFile)) then return end
+            local data = HttpService:JSONDecode(readfile(bindsFile))
+            if type(data) ~= "table" then return end
+            if data.aimKey and Enum.KeyCode[data.aimKey] then
+                settings.aimKey = Enum.KeyCode[data.aimKey]
+            end
+            if data.aim2Key and Enum.KeyCode[data.aim2Key] then
+                settings.aim2Key = Enum.KeyCode[data.aim2Key]
+            end
+            if data.silentKey and Enum.KeyCode[data.silentKey] then
+                silentAim.HoldKey = Enum.KeyCode[data.silentKey]
+            end
+            if data.kunaiSnapKey and Enum.KeyCode[data.kunaiSnapKey] then
+                settings.kunaiSnapKey = Enum.KeyCode[data.kunaiSnapKey]
+            end
+        end)
+    end
 
     -- AIMBOT 1
     Tabs.Aimbot:AddToggle("AimOn", {Title = "Enable Aimbot", Default = false}):OnChanged(function(v)
@@ -1601,6 +1642,13 @@ local function Flunium_Boot()
         end
     })
 
+    -- Загрузка биндов после создания UI
+    loadBinds()
+    pcall(function() aimBindButton:SetTitle("Bind: " .. settings.aimKey.Name) end)
+    pcall(function() aim2BindButton:SetTitle("Bind: " .. settings.aim2Key.Name) end)
+    pcall(function() silentBindButton:SetTitle("Bind: " .. silentAim.HoldKey.Name) end)
+    pcall(function() kunaiSnapBindBtn:SetTitle("Bind: " .. settings.kunaiSnapKey.Name) end)
+
     -- INPUT
     UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
@@ -1618,24 +1666,28 @@ local function Flunium_Boot()
             settings.kunaiSnapKey = input.KeyCode
             settings.kunaiSnapListening = false
             pcall(function() kunaiSnapBindBtn:SetTitle("Bind: " .. input.KeyCode.Name) end)
+            saveBinds()
             return
         end
         if silentAim.ListeningForBind and input.UserInputType == Enum.UserInputType.Keyboard then
             silentAim.HoldKey = input.KeyCode
             silentAim.ListeningForBind = false
             pcall(function() silentBindButton:SetTitle("Bind: " .. input.KeyCode.Name) end)
+            saveBinds()
             return
         end
         if settings.listeningAimBind and input.UserInputType == Enum.UserInputType.Keyboard then
             settings.aimKey = input.KeyCode
             settings.listeningAimBind = false
             pcall(function() aimBindButton:SetTitle("Bind: " .. input.KeyCode.Name) end)
+            saveBinds()
             return
         end
         if settings.aim2ListeningForBind and input.UserInputType == Enum.UserInputType.Keyboard then
             settings.aim2Key = input.KeyCode
             settings.aim2ListeningForBind = false
             pcall(function() aim2BindButton:SetTitle("Bind: " .. input.KeyCode.Name) end)
+            saveBinds()
             return
         end
 
@@ -1746,6 +1798,7 @@ local function Flunium_Boot()
         if ESP.Enabled then rebuildESP() end
     end)
 
+    -- ========== SAVE MANAGER HOOKS ==========
     pcall(function()
         SaveManager:SetLibrary(Fluent)
         InterfaceManager:SetLibrary(Fluent)
@@ -1757,11 +1810,29 @@ local function Flunium_Boot()
         SaveManager:LoadAutoloadConfig()
     end)
 
+    -- Хук на SaveConfig/LoadConfig для сохранения биндов
+    local oldSaveConfig = SaveManager.SaveConfig
+    SaveManager.SaveConfig = function(self, name)
+        oldSaveConfig(self, name)
+        saveBinds()
+    end
+
+    local oldLoadConfig = SaveManager.LoadConfig
+    SaveManager.LoadConfig = function(self, name)
+        oldLoadConfig(self, name)
+        task.defer(function()
+            loadBinds()
+            pcall(function() aimBindButton:SetTitle("Bind: " .. settings.aimKey.Name) end)
+            pcall(function() aim2BindButton:SetTitle("Bind: " .. settings.aim2Key.Name) end)
+            pcall(function() silentBindButton:SetTitle("Bind: " .. silentAim.HoldKey.Name) end)
+            pcall(function() kunaiSnapBindBtn:SetTitle("Bind: " .. settings.kunaiSnapKey.Name) end)
+        end)
+    end
+
     print("====================================")
-    print("✅ Flunium Client v3.0 загружен")
-    print("📊 Overlay: Move Step slider + X/Y inputs")
-    print("🎯 Kunai Mark Aimbot: только игроки с маркой")
-    print("🌀 Kunai Snap: FOV + 360 toggle, без уведомлений")
+    print("✅ Flunium Client v3.1 загружен")
+    print("💾 Бинды: сохранение в FluniumClient/binds.json")
+    print("🚫 Марки на LocalPlayer игнорируются")
     print("📌 RightControl — скрыть меню")
     print("====================================")
 
