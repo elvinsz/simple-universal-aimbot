@@ -1,10 +1,8 @@
 --[[
-    Flunium Client v2.3
-    ✅ Kunai Marker из v1.9 (полный, с debugLog)
-    ✅ Fly (AlignPosition, до 1000 studs/s, Movement tab)
-    ✅ Sticky Aim, Range Check, Inf Range
-    ✅ Все вкладки (ESP, Performance, Colors, Visual, Server)
-    ✅ Исправлен синтаксис local-переменных
+    Flunium Client v2.4
+    ✅ Kunai Marker: возвращен выбор Target Mode (Marker / Head)
+    ✅ Починен хук на маркер
+    ✅ Fly (AlignPosition), Sticky Aim, Range Check
 ]]
 
 local function Flunium_Boot()
@@ -29,7 +27,7 @@ local function Flunium_Boot()
         end)
         if alive then
             pcall(function()
-                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v2.3 уже запущен!", Duration = 3})
+                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v2.4 уже запущен!", Duration = 3})
             end)
             return
         else
@@ -132,7 +130,8 @@ local function Flunium_Boot()
 
     local markerClick = {
         Enabled = false, ModifierKey = Enum.KeyCode.Backquote,
-        ListeningForBind = false, Debug = false, HeightOffset = 3
+        ListeningForBind = false, Debug = false, HeightOffset = 3,
+        TargetMode = "Head" -- ✅ Вернули выбор
     }
 
     local ESP = {
@@ -253,41 +252,15 @@ local function Flunium_Boot()
         end
     end
 
-    -- ══════════ PERFORMANCE ══════════
-    local function applyLowDetail()
-        pcall(function()
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("BasePart") and not perf.cachedProps[obj] then perf.cachedProps[obj] = {Material = obj.Material, Reflectance = obj.Reflectance} end
-            end
-            for obj, data in pairs(perf.cachedProps) do
-                if obj and obj.Parent then
-                    if (perf.removeTextures or perf.lowDetail) and obj:IsA("BasePart") then obj.Material = Enum.Material.SmoothPlastic end
-                    if perf.forcePlastic and obj:IsA("BasePart") then obj.Material = Enum.Material.Plastic; obj.Reflectance = 0 end
-                end
-            end
-        end)
-    end
-    local function restoreLowDetail()
-        pcall(function()
-            for obj, data in pairs(perf.cachedProps) do
-                if obj and obj.Parent then pcall(function() if obj:IsA("BasePart") then obj.Material = data.Material; obj.Reflectance = data.Reflectance end end) end
-            end
-            perf.cachedProps = {}
-        end)
-    end
+    -- PERFORMANCE
+    local function applyLowDetail() pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("BasePart") and not perf.cachedProps[obj] then perf.cachedProps[obj] = {Material = obj.Material, Reflectance = obj.Reflectance} end end; for obj, data in pairs(perf.cachedProps) do if obj and obj.Parent then if (perf.removeTextures or perf.lowDetail) and obj:IsA("BasePart") then obj.Material = Enum.Material.SmoothPlastic end; if perf.forcePlastic and obj:IsA("BasePart") then obj.Material = Enum.Material.Plastic; obj.Reflectance = 0 end end end end) end
+    local function restoreLowDetail() pcall(function() for obj, data in pairs(perf.cachedProps) do if obj and obj.Parent then pcall(function() if obj:IsA("BasePart") then obj.Material = data.Material; obj.Reflectance = data.Reflectance end end) end end; perf.cachedProps = {} end) end
     local function setRemoveTextures(v) perf.removeTextures = v; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Decal") or obj:IsA("Texture") then obj.Transparency = v and 1 or 0 end end end) end
     local function setRemoveDecals(v) perf.removeDecals = v; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Decal") then obj.Transparency = v and 1 or 0 end end end) end
     local particleCleanupConn = nil
-    local function startParticleCleanup()
-        if particleCleanupConn then return end
-        particleCleanupConn = RunService.Heartbeat:Connect(function() if not (perf.removeParticles or perf.lowDetail) then return end; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("ParticleEmitter") and obj.TimeScale == 0 then pcall(function() obj:Clear() end) end end end) end)
-    end
+    local function startParticleCleanup() if particleCleanupConn then return end; particleCleanupConn = RunService.Heartbeat:Connect(function() if not (perf.removeParticles or perf.lowDetail) then return end; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("ParticleEmitter") and obj.TimeScale == 0 then pcall(function() obj:Clear() end) end end end) end) end
     local function stopParticleCleanup() if particleCleanupConn then particleCleanupConn:Disconnect(); particleCleanupConn = nil end end
-    local function setRemoveParticles(v)
-        perf.removeParticles = v
-        pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then if v then if not obj:GetAttribute("FluniumTimeScale") then obj:SetAttribute("FluniumTimeScale", obj.TimeScale) end; obj.TimeScale = 0; pcall(function() obj:Clear() end) else local ts = obj:GetAttribute("FluniumTimeScale"); if ts ~= nil then obj.TimeScale = ts; obj:SetAttribute("FluniumTimeScale", nil) end end end end end)
-        if v then startParticleCleanup() else if not perf.removeCharFx then stopParticleCleanup() end end
-    end
+    local function setRemoveParticles(v) perf.removeParticles = v; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then if v then if not obj:GetAttribute("FluniumTimeScale") then obj:SetAttribute("FluniumTimeScale", obj.TimeScale) end; obj.TimeScale = 0; pcall(function() obj:Clear() end) else local ts = obj:GetAttribute("FluniumTimeScale"); if ts ~= nil then obj.TimeScale = ts; obj:SetAttribute("FluniumTimeScale", nil) end end end end end); if v then startParticleCleanup() else if not perf.removeCharFx then stopParticleCleanup() end end end
     local function setRemoveShadows(v) perf.removeShadows = v; Lighting.GlobalShadows = not v end
     local function setForcePlastic(v) perf.forcePlastic = v; if v then applyLowDetail() else restoreLowDetail() end end
     local function setDisablePostFx(v) perf.disablePostFx = v; pcall(function() for _, e in ipairs(Lighting:GetChildren()) do if e:IsA("PostEffect") or e:IsA("BloomEffect") or e:IsA("BlurEffect") or e:IsA("ColorCorrectionEffect") or e:IsA("SunRaysEffect") or e:IsA("DepthOfFieldEffect") then e.Enabled = not v end end end) end
@@ -389,7 +362,7 @@ local function Flunium_Boot()
     Players.PlayerRemoving:Connect(function(p) clearPlayer(p) end)
     RunService.Heartbeat:Connect(function(dt) if not ESP.Enabled or not ESP.Visible then return end; espAcc += dt; if espAcc >= ESP.UpdateRate then espAcc = 0; updateESP() end end)
 
-    -- UNIFIED HOOK (v1.9 Marker Logic restored)
+    -- UNIFIED HOOK (v1.9 Marker Logic + v2.4 Target Mode)
     local savedEnemyPos = nil
     local function getPriorityEnemy()
         local myChar = LocalPlayer.Character; local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart"); if not myRoot then return nil end
@@ -400,7 +373,21 @@ local function Flunium_Boot()
             local char = p.Character; if not char then continue end
             local hum = char:FindFirstChild("Humanoid"); if not hum or hum.Health <= 0 then continue end
             local root = char:FindFirstChild("HumanoidRootPart"); local head = char:FindFirstChild("Head")
-            local aimPos; if head then aimPos = head.Position + Vector3.new(0, markerClick.HeightOffset, 0) elseif root then aimPos = root.Position + Vector3.new(0, markerClick.HeightOffset + 2, 0) else continue end
+            
+            -- ✅ Выбор цели: сама марка (Head) или выше головы (Head + offset)
+            local aimPos
+            if head then
+                if markerClick.TargetMode == "Head" then
+                    aimPos = head.Position + Vector3.new(0, markerClick.HeightOffset, 0)
+                else
+                    aimPos = head.Position
+                end
+            elseif root then
+                aimPos = root.Position + Vector3.new(0, markerClick.HeightOffset + 2, 0)
+            else
+                continue
+            end
+            
             local worldDist = (root and root.Position or aimPos - myPos).Magnitude; local sp, onScreen = Camera:WorldToViewportPoint(aimPos)
             local screenDist = onScreen and (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude or 9999; local score = screenDist + (worldDist * 0.1)
             if score < bestScore then bestScore = score; best = aimPos end
@@ -414,18 +401,6 @@ local function Flunium_Boot()
             for k, v in pairs(t) do if typeof(v) == "Vector3" then t[k] = newPos elseif typeof(v) == "CFrame" then t[k] = CFrame.new(newPos) elseif type(v) == "table" then t[k] = replaceVectorInTable(v, newPos, depth + 1) end end
         end
         return t
-    end
-    local function deepLog(t, prefix, depth)
-        depth = depth or 0; prefix = prefix or ""
-        if depth > 4 then return end
-        if type(t) == "table" then
-            for k, v in pairs(t) do
-                local vt = typeof(v)
-                if vt == "Vector3" or vt == "CFrame" then print(prefix .. "[" .. tostring(k) .. "] = " .. vt .. " " .. tostring(v))
-                elseif type(v) == "table" then print(prefix .. "[" .. tostring(k) .. "] = table:"); deepLog(v, prefix .. "  ", depth + 1)
-                else print(prefix .. "[" .. tostring(k) .. "] = " .. vt .. " " .. tostring(v)) end
-            end
-        end
     end
     local function isModifierHeld() if not markerClick.Enabled then return false end; return UserInputService:IsKeyDown(markerClick.ModifierKey) end
 
@@ -448,14 +423,6 @@ local function Flunium_Boot()
                 local isTeleportEvent = nameLower:find("teleport", 1, true)
                 
                 if method == "FireServer" and (isMarkerEvent or isTeleportEvent) then
-                    if markerClick.Debug then
-                        print("[HOOK] " .. tostring(self.Name) .. " | args: " .. #args)
-                        for i, a in ipairs(args) do
-                            print("  [" .. i .. "] = " .. typeof(a) .. " " .. tostring(a))
-                            if type(a) == "table" then deepLog(a, "     ", 0) end
-                        end
-                    end
-                    
                     if isModifierHeld() then
                         local enemyPos = getPriorityEnemy()
                         if enemyPos then
@@ -465,7 +432,6 @@ local function Flunium_Boot()
                                 elseif typeof(args[i]) == "CFrame" then args[i] = CFrame.new(enemyPos)
                                 elseif type(args[i]) == "table" then args[i] = replaceVectorInTable(args[i], enemyPos, 0) end
                             end
-                            if markerClick.Debug then print("[HOOK] ✅ Подменён " .. tostring(self.Name) .. " → " .. tostring(enemyPos)) end
                             return oldNamecall(self, table.unpack(args))
                         end
                     end
@@ -485,7 +451,6 @@ local function Flunium_Boot()
                 return oldNewIndex(self, key, value)
             end)
             setreadonly(metaT, true); unifiedHook = true
-            print("✅ Unified Hook установлен (v1.9 Marker Logic)")
         end)
         if not ok then warn("❌ Unified Hook: " .. tostring(err)) end
     end
@@ -656,7 +621,7 @@ local function Flunium_Boot()
 
     -- GUI
     local Window = Fluent:CreateWindow({
-        Title = "Flunium Client v2.3",
+        Title = "Flunium Client v2.4",
         SubTitle = "Movement • Aimbots • Silent Aim",
         TabWidth = 160, Size = UDim2.fromOffset(600, 520),
         Acrylic = true, Theme = "Dark", MinimizeKey = Enum.KeyCode.RightControl
@@ -695,8 +660,22 @@ local function Flunium_Boot()
     Tabs.Aimbot:AddToggle("WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.wallCheck = v end)
     Tabs.Aimbot:AddToggle("TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.teamCheck = v end)
 
-    -- AIMBOT 2
+    -- AIMBOT 2 + MARKER
     Tabs.Aimbot2:AddParagraph({Title = "🎯 Aimbot 2 — Headshot", Content = "Целится ВЫШЕ головы. По умолчанию на клавише [1]"})
+    
+    -- ✅ Marker Section (наверху, как в v1.9)
+    local markerSection = Tabs.Aimbot2:AddSection("Kunai Marker")
+    markerSection:AddToggle("MarkerClick", {Title = "🌀 Enable Marker Hack", Default = false}):OnChanged(function(v) markerClick.Enabled = v; if v then enableUnifiedHook(); Fluent:Notify({Title = "🌀 Marker ВКЛ", Content = "Зажми " .. markerClick.ModifierKey.Name, Duration = 3}) else if not silentAim.MasterEnabled then disableUnifiedHook() end end end)
+    local markerBindBtn = markerSection:AddButton({Title = "🎹 Modifier: " .. markerClick.ModifierKey.Name, Callback = function() markerClick.ListeningForBind = true; pcall(function() markerBindBtn:SetTitle("🎹 Нажмите...") end) end})
+    
+    -- ✅ Выбор цели: Марка или Голова
+    markerSection:AddDropdown("MarkerTarget", {Title = "Target Mode", Values = {"Head (Выше головы)", "Marker (В саму марку)"}, Default = 1}):OnChanged(function(v) 
+        if v == "Head (Выше головы)" then markerClick.TargetMode = "Head" else markerClick.TargetMode = "Marker" end 
+    end)
+    
+    markerSection:AddSlider("MarkerH", {Title = "📏 Height Above Head", Default = 3, Min = 0, Max = 20, Rounding = 0}):OnChanged(function(v) markerClick.HeightOffset = v end)
+    markerSection:AddToggle("MarkerDebug", {Title = "🔍 Debug", Default = false}):OnChanged(function(v) markerClick.Debug = v end)
+
     Tabs.Aimbot2:AddToggle("Aim2On", {Title = "Enable Aimbot 2", Default = false}):OnChanged(function(v) aim2Enabled = v; if fovCircle2 then fovCircle2.Visible = settings.aim2ShowFovCircle and v and not settings.aim2Mode360 end; if not v then aim2ing = false; aim2Target = nil end end)
     Tabs.Aimbot2:AddToggle("Aim2ShowFOV", {Title = "Show FOV Circle", Default = true}):OnChanged(function(v) settings.aim2ShowFovCircle = v; if fovCircle2 then fovCircle2.Visible = v and aim2Enabled and not settings.aim2Mode360 end end)
     Tabs.Aimbot2:AddColorpicker("Aim2FovColor", {Title = "FOV Color", Default = Color3.fromRGB(255, 165, 0)}):OnChanged(function(c) settings.aim2FovColor = c; if fovCircle2 and not settings.aim2RainbowFov then fovCircle2.Color = c end end)
@@ -713,11 +692,6 @@ local function Flunium_Boot()
     Tabs.Aimbot2:AddSlider("Aim2Pred", {Title = "Prediction", Default = 6, Min = 0, Max = 30, Rounding = 0}):OnChanged(function(v) settings.aim2Prediction = v / 100 end)
     Tabs.Aimbot2:AddToggle("Aim2WallCheck", {Title = "Wall Check", Default = false}):OnChanged(function(v) settings.aim2WallCheck = v end)
     Tabs.Aimbot2:AddToggle("Aim2TeamCheck", {Title = "Team Check", Default = false}):OnChanged(function(v) settings.aim2TeamCheck = v end)
-    local markerSection = Tabs.Aimbot2:AddSection("Kunai Marker")
-    markerSection:AddToggle("MarkerClick", {Title = "🌀 Enable Marker Hack", Default = false}):OnChanged(function(v) markerClick.Enabled = v; if v then enableUnifiedHook(); Fluent:Notify({Title = "🌀 Marker ВКЛ", Content = "Зажми " .. markerClick.ModifierKey.Name, Duration = 3}) else if not silentAim.MasterEnabled then disableUnifiedHook() end end end)
-    local markerBindBtn = markerSection:AddButton({Title = "🎹 Modifier: " .. markerClick.ModifierKey.Name, Callback = function() markerClick.ListeningForBind = true; pcall(function() markerBindBtn:SetTitle("🎹 Нажмите...") end) end})
-    markerSection:AddSlider("MarkerH", {Title = "📏 Marker Height", Default = 3, Min = 0, Max = 20, Rounding = 0}):OnChanged(function(v) markerClick.HeightOffset = v end)
-    markerSection:AddToggle("MarkerDebug", {Title = "🔍 Debug", Default = false}):OnChanged(function(v) markerClick.Debug = v end)
 
     -- SILENT AIM
     Tabs.Silent:AddToggle("SilentMaster", {Title = "Enable Silent Aim", Default = false}):OnChanged(function(v) silentAim.MasterEnabled = v; if v then enableUnifiedHook() else if not markerClick.Enabled then disableUnifiedHook() end end end)
@@ -901,8 +875,8 @@ local function Flunium_Boot()
     UserInputService.InputBegan:Connect(function(input, gp) if gp then return end; task.delay(0.1, saveBinds) end)
 
     print("====================================")
-    print("✅ Flunium Client v2.3 загружен!")
-    print("🌀 Kunai Marker: v1.9 логика (debugLog + replaceVectorInTable)")
+    print("✅ Flunium Client v2.4 загружен!")
+    print("🌀 Kunai Marker: Выбор цели Marker/Head")
     print("✈️ Fly: AlignPosition, Movement tab")
     print("====================================")
 
