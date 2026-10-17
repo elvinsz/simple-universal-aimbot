@@ -1,9 +1,10 @@
 --[[
-    Flunium Client v2.2
-    ✅ Полностью переписан Fly (AlignPosition, плавный, до 1000+ studs/s)
-    ✅ Отдельная вкладка Movement
-    ✅ Кейбинд на Fly (Toggle / Hold)
-    ✅ Исправлена синтаксическая ошибка (658 строка)
+    Flunium Client v2.3
+    ✅ Kunai Marker из v1.9 (полный, с debugLog)
+    ✅ Fly (AlignPosition, до 1000 studs/s, Movement tab)
+    ✅ Sticky Aim, Range Check, Inf Range
+    ✅ Все вкладки (ESP, Performance, Colors, Visual, Server)
+    ✅ Исправлен синтаксис local-переменных
 ]]
 
 local function Flunium_Boot()
@@ -28,7 +29,7 @@ local function Flunium_Boot()
         end)
         if alive then
             pcall(function()
-                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v2.2 уже запущен!", Duration = 3})
+                existingFluent:Notify({Title = "⚠️ Уже загружено", Content = "Flunium Client v2.3 уже запущен!", Duration = 3})
             end)
             return
         else
@@ -167,17 +168,11 @@ local function Flunium_Boot()
         GlobalShadows = Lighting.GlobalShadows
     }
 
-    -- ══════════ FLY SETTINGS ══════════
+    -- FLY STATE
     local flyState = {
-        Enabled = false,
-        MasterEnabled = false,
-        Speed = 150,
-        Mode = "Toggle",
-        Key = Enum.KeyCode.F,
-        ListeningForBind = false,
-        Connection = nil,
-        AlignPosition = nil,
-        Attachment = nil
+        Enabled = false, MasterEnabled = false, Speed = 150,
+        Mode = "Toggle", Key = Enum.KeyCode.F, ListeningForBind = false,
+        Connection = nil, AlignPosition = nil, Attachment = nil
     }
 
     local aimbotEnabled, aiming, currentTarget = false, false, nil
@@ -214,7 +209,7 @@ local function Flunium_Boot()
         silentFovCircle.Transparency = 1; silentFovCircle.Visible = false
     end)
 
-    -- FLY CORE FUNCTION (AlignPosition)
+    -- FLY CORE FUNCTION
     local function toggleFly(state)
         flyState.Enabled = state
         local char = LocalPlayer.Character
@@ -280,89 +275,34 @@ local function Flunium_Boot()
             perf.cachedProps = {}
         end)
     end
-    local function setRemoveTextures(v)
-        perf.removeTextures = v
-        pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Decal") or obj:IsA("Texture") then obj.Transparency = v and 1 or 0 end end end)
-    end
-    local function setRemoveDecals(v)
-        perf.removeDecals = v
-        pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Decal") then obj.Transparency = v and 1 or 0 end end end)
-    end
+    local function setRemoveTextures(v) perf.removeTextures = v; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Decal") or obj:IsA("Texture") then obj.Transparency = v and 1 or 0 end end end) end
+    local function setRemoveDecals(v) perf.removeDecals = v; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Decal") then obj.Transparency = v and 1 or 0 end end end) end
     local particleCleanupConn = nil
     local function startParticleCleanup()
         if particleCleanupConn then return end
-        particleCleanupConn = RunService.Heartbeat:Connect(function()
-            if not (perf.removeParticles or perf.lowDetail) then return end
-            pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("ParticleEmitter") and obj.TimeScale == 0 then pcall(function() obj:Clear() end) end end end)
-        end)
+        particleCleanupConn = RunService.Heartbeat:Connect(function() if not (perf.removeParticles or perf.lowDetail) then return end; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("ParticleEmitter") and obj.TimeScale == 0 then pcall(function() obj:Clear() end) end end end) end)
     end
     local function stopParticleCleanup() if particleCleanupConn then particleCleanupConn:Disconnect(); particleCleanupConn = nil end end
     local function setRemoveParticles(v)
         perf.removeParticles = v
-        pcall(function()
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-                    if v then
-                        if not obj:GetAttribute("FluniumTimeScale") then obj:SetAttribute("FluniumTimeScale", obj.TimeScale) end
-                        obj.TimeScale = 0; pcall(function() obj:Clear() end)
-                    else
-                        local ts = obj:GetAttribute("FluniumTimeScale"); if ts ~= nil then obj.TimeScale = ts; obj:SetAttribute("FluniumTimeScale", nil) end
-                    end
-                end
-            end
-        end)
+        pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then if v then if not obj:GetAttribute("FluniumTimeScale") then obj:SetAttribute("FluniumTimeScale", obj.TimeScale) end; obj.TimeScale = 0; pcall(function() obj:Clear() end) else local ts = obj:GetAttribute("FluniumTimeScale"); if ts ~= nil then obj.TimeScale = ts; obj:SetAttribute("FluniumTimeScale", nil) end end end end end)
         if v then startParticleCleanup() else if not perf.removeCharFx then stopParticleCleanup() end end
     end
     local function setRemoveShadows(v) perf.removeShadows = v; Lighting.GlobalShadows = not v end
     local function setForcePlastic(v) perf.forcePlastic = v; if v then applyLowDetail() else restoreLowDetail() end end
-    local function setDisablePostFx(v)
-        perf.disablePostFx = v
-        pcall(function() for _, e in ipairs(Lighting:GetChildren()) do if e:IsA("PostEffect") or e:IsA("BloomEffect") or e:IsA("BlurEffect") or e:IsA("ColorCorrectionEffect") or e:IsA("SunRaysEffect") or e:IsA("DepthOfFieldEffect") then e.Enabled = not v end end end)
-    end
-    local function setExtendFog(v)
-        perf.extendFog = v
-        if v then Lighting.FogEnd = 100000; Lighting.FogStart = 100000 else Lighting.FogEnd = perf.cachedFog.FogEnd; Lighting.FogStart = perf.cachedFog.FogStart end
-    end
-    local function setOptimizeWater(v)
-        perf.optimizeWater = v
-        pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Terrain") then obj.WaterWaveSize = v and 0 or obj.WaterWaveSize; obj.WaterReflectance = v and 0 or obj.WaterReflectance; obj.WaterTransparency = v and 1 or obj.WaterTransparency end end end)
-    end
-    local function setRemoveLights(v)
-        perf.removeLights = v
-        pcall(function()
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
-                    if not perf.cachedLight[obj] then perf.cachedLight[obj] = {Enabled = obj.Enabled, Range = obj.Range, Brightness = obj.Brightness} end
-                    obj.Enabled = not v
-                    if v then obj.Range = 0; obj.Brightness = 0 else local c = perf.cachedLight[obj]; if c then obj.Range = c.Range; obj.Brightness = c.Brightness end end
-                end
-            end
-        end)
-    end
+    local function setDisablePostFx(v) perf.disablePostFx = v; pcall(function() for _, e in ipairs(Lighting:GetChildren()) do if e:IsA("PostEffect") or e:IsA("BloomEffect") or e:IsA("BlurEffect") or e:IsA("ColorCorrectionEffect") or e:IsA("SunRaysEffect") or e:IsA("DepthOfFieldEffect") then e.Enabled = not v end end end) end
+    local function setExtendFog(v) perf.extendFog = v; if v then Lighting.FogEnd = 100000; Lighting.FogStart = 100000 else Lighting.FogEnd = perf.cachedFog.FogEnd; Lighting.FogStart = perf.cachedFog.FogStart end end
+    local function setOptimizeWater(v) perf.optimizeWater = v; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Terrain") then obj.WaterWaveSize = v and 0 or obj.WaterWaveSize; obj.WaterReflectance = v and 0 or obj.WaterReflectance; obj.WaterTransparency = v and 1 or obj.WaterTransparency end end end) end
+    local function setRemoveLights(v) perf.removeLights = v; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then if not perf.cachedLight[obj] then perf.cachedLight[obj] = {Enabled = obj.Enabled, Range = obj.Range, Brightness = obj.Brightness} end; obj.Enabled = not v; if v then obj.Range = 0; obj.Brightness = 0 else local c = perf.cachedLight[obj]; if c then obj.Range = c.Range; obj.Brightness = c.Brightness end end end end end) end
     local function setRemoveBeams(v) perf.removeBeams = v; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Beam") or obj:IsA("Trail") then obj.Enabled = not v end end end) end
     local function setRemoveHighlights(v) perf.removeHighlights = v; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Highlight") or obj:IsA("SelectionBox") or obj:IsA("BoxHandleAdornment") or obj:IsA("SelectionSphere") then obj.Enabled = not v end end end) end
-    local function setHideAccessories(v)
-        perf.hideAccessories = v
-        pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Accessory") or obj:IsA("Hat") then local handle = obj:FindFirstChild("Handle"); if handle then handle.Transparency = v and 1 or 0; handle.LocalTransparencyModifier = v and 1 or 0 end end end end)
-    end
+    local function setHideAccessories(v) perf.hideAccessories = v; pcall(function() for _, obj in ipairs(Workspace:GetDescendants()) do if obj:IsA("Accessory") or obj:IsA("Hat") then local handle = obj:FindFirstChild("Handle"); if handle then handle.Transparency = v and 1 or 0; handle.LocalTransparencyModifier = v and 1 or 0 end end end end) end
     local charFxCleanupConn = nil
-    local function killCharFx(char)
-        pcall(function() for _, obj in ipairs(char:GetDescendants()) do if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then pcall(function() obj:Clear() end); pcall(function() obj.Enabled = false end) elseif obj:IsA("Beam") or obj:IsA("Trail") then pcall(function() obj.Enabled = false end) elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then pcall(function() obj.Enabled = false end) elseif obj:IsA("Highlight") then pcall(function() obj.Enabled = false end) end end end)
-    end
-    local function startCharFxCleanup()
-        if charFxCleanupConn then return end
-        charFxCleanupConn = RunService.Heartbeat:Connect(function() if not perf.removeCharFx then return end; pcall(function() for _, plr in ipairs(Players:GetPlayers()) do local char = plr.Character; if char then killCharFx(char) end end end) end)
-    end
+    local function killCharFx(char) pcall(function() for _, obj in ipairs(char:GetDescendants()) do if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then pcall(function() obj:Clear() end); pcall(function() obj.Enabled = false end) elseif obj:IsA("Beam") or obj:IsA("Trail") then pcall(function() obj.Enabled = false end) elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then pcall(function() obj.Enabled = false end) elseif obj:IsA("Highlight") then pcall(function() obj.Enabled = false end) end end end) end
+    local function startCharFxCleanup() if charFxCleanupConn then return end; charFxCleanupConn = RunService.Heartbeat:Connect(function() if not perf.removeCharFx then return end; pcall(function() for _, plr in ipairs(Players:GetPlayers()) do local char = plr.Character; if char then killCharFx(char) end end end) end) end
     local function stopCharFxCleanup() if charFxCleanupConn then charFxCleanupConn:Disconnect(); charFxCleanupConn = nil end end
-    local function setRemoveCharFx(v)
-        perf.removeCharFx = v
-        if v then pcall(function() for _, plr in ipairs(Players:GetPlayers()) do local char = plr.Character; if char then killCharFx(char) end end end); startCharFxCleanup(); startParticleCleanup()
-        else stopCharFxCleanup(); if not perf.removeParticles then stopParticleCleanup() end end
-    end
-    local function setFpsUnlock(v)
-        perf.fpsUnlock = v
-        if v then pcall(function() setfpscap(perf.fpsCap) end); Fluent:Notify({Title = "⚡ FPS Unlock", Content = "Cap: " .. tostring(perf.fpsCap), Duration = 3}) else pcall(function() setfpscap(60) end) end
-    end
+    local function setRemoveCharFx(v) perf.removeCharFx = v; if v then pcall(function() for _, plr in ipairs(Players:GetPlayers()) do local char = plr.Character; if char then killCharFx(char) end end end); startCharFxCleanup(); startParticleCleanup() else stopCharFxCleanup(); if not perf.removeParticles then stopParticleCleanup() end end end
+    local function setFpsUnlock(v) perf.fpsUnlock = v; if v then pcall(function() setfpscap(perf.fpsCap) end); Fluent:Notify({Title = "⚡ FPS Unlock", Content = "Cap: " .. tostring(perf.fpsCap), Duration = 3}) else pcall(function() setfpscap(60) end) end end
 
     -- HISTORY
     local lastJobHistory = {}
@@ -435,10 +375,7 @@ local function Flunium_Boot()
             else d.dodgeLabel.Visible = false end
         end
     end
-    local function rebuildESP()
-        for p in pairs(espData) do clearPlayer(p) end
-        for _, p in ipairs(Players:GetPlayers()) do if p ~= LocalPlayer and p.Character and isWhitelisted(p) then task.spawn(createPlayerESP, p, p.Character) end end
-    end
+    local function rebuildESP() for p in pairs(espData) do clearPlayer(p) end; for _, p in ipairs(Players:GetPlayers()) do if p ~= LocalPlayer and p.Character and isWhitelisted(p) then task.spawn(createPlayerESP, p, p.Character) end end end
     local function espWatch(p)
         if p == LocalPlayer then return end
         if espConns[p] then for _, c in ipairs(espConns[p]) do pcall(function() c:Disconnect() end) end end
@@ -452,7 +389,7 @@ local function Flunium_Boot()
     Players.PlayerRemoving:Connect(function(p) clearPlayer(p) end)
     RunService.Heartbeat:Connect(function(dt) if not ESP.Enabled or not ESP.Visible then return end; espAcc += dt; if espAcc >= ESP.UpdateRate then espAcc = 0; updateESP() end end)
 
-    -- UNIFIED HOOK
+    -- UNIFIED HOOK (v1.9 Marker Logic restored)
     local savedEnemyPos = nil
     local function getPriorityEnemy()
         local myChar = LocalPlayer.Character; local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart"); if not myRoot then return nil end
@@ -478,6 +415,18 @@ local function Flunium_Boot()
         end
         return t
     end
+    local function deepLog(t, prefix, depth)
+        depth = depth or 0; prefix = prefix or ""
+        if depth > 4 then return end
+        if type(t) == "table" then
+            for k, v in pairs(t) do
+                local vt = typeof(v)
+                if vt == "Vector3" or vt == "CFrame" then print(prefix .. "[" .. tostring(k) .. "] = " .. vt .. " " .. tostring(v))
+                elseif type(v) == "table" then print(prefix .. "[" .. tostring(k) .. "] = table:"); deepLog(v, prefix .. "  ", depth + 1)
+                else print(prefix .. "[" .. tostring(k) .. "] = " .. vt .. " " .. tostring(v)) end
+            end
+        end
+    end
     local function isModifierHeld() if not markerClick.Enabled then return false end; return UserInputService:IsKeyDown(markerClick.ModifierKey) end
 
     local unifiedHook = false
@@ -495,23 +444,39 @@ local function Flunium_Boot()
             metaT.__namecall = newcclosure(function(self, ...)
                 local method = getnamecallmethod(); local args = {...}
                 local nameLower = string.lower(tostring(self.Name))
-                local isMarker = nameLower:find("marker", 1, true) or nameLower:find("kunai", 1, true) or nameLower:find("namikaze", 1, true)
-                local isTeleport = nameLower:find("teleport", 1, true)
-                if method == "FireServer" and (isMarker or isTeleport) and isModifierHeld() then
-                    local enemyPos = getPriorityEnemy()
-                    if enemyPos then
-                        savedEnemyPos = enemyPos
-                        for i = 1, #args do
-                            if typeof(args[i]) == "Vector3" then args[i] = enemyPos
-                            elseif typeof(args[i]) == "CFrame" then args[i] = CFrame.new(enemyPos)
-                            elseif type(args[i]) == "table" then args[i] = replaceVectorInTable(args[i], enemyPos, 0) end
+                local isMarkerEvent = nameLower:find("marker", 1, true) or nameLower:find("kunai", 1, true) or nameLower:find("namikaze", 1, true)
+                local isTeleportEvent = nameLower:find("teleport", 1, true)
+                
+                if method == "FireServer" and (isMarkerEvent or isTeleportEvent) then
+                    if markerClick.Debug then
+                        print("[HOOK] " .. tostring(self.Name) .. " | args: " .. #args)
+                        for i, a in ipairs(args) do
+                            print("  [" .. i .. "] = " .. typeof(a) .. " " .. tostring(a))
+                            if type(a) == "table" then deepLog(a, "     ", 0) end
+                        end
+                    end
+                    
+                    if isModifierHeld() then
+                        local enemyPos = getPriorityEnemy()
+                        if enemyPos then
+                            savedEnemyPos = enemyPos
+                            for i = 1, #args do
+                                if typeof(args[i]) == "Vector3" then args[i] = enemyPos
+                                elseif typeof(args[i]) == "CFrame" then args[i] = CFrame.new(enemyPos)
+                                elseif type(args[i]) == "table" then args[i] = replaceVectorInTable(args[i], enemyPos, 0) end
+                            end
+                            if markerClick.Debug then print("[HOOK] ✅ Подменён " .. tostring(self.Name) .. " → " .. tostring(enemyPos)) end
+                            return oldNamecall(self, table.unpack(args))
                         end
                     end
                 end
+
                 if method == "FireServer" and self.Name == "update" then if args[1] == "fixmouse" and silentAim.Enabled and silentAim.CachedCFrame then args[2] = silentAim.CachedCFrame end end
                 if silentAim.InfRange and (method == "Raycast" or method == "raycast") and silentAim.CachedTarget then local origin = args[1]; local targetPos = silentAim.CachedTarget.Position; args[2] = (targetPos - origin).Unit * 4.999999721059845e+27 end
+                
                 return oldNamecall(self, table.unpack(args))
             end)
+            
             metaT.__newindex = newcclosure(function(self, key, value)
                 if perf.blockNewEffects and (key == "Enabled" or key == "Brightness" or key == "Range") then
                     local ok2, cls = pcall(function() return self.ClassName end)
@@ -520,7 +485,7 @@ local function Flunium_Boot()
                 return oldNewIndex(self, key, value)
             end)
             setreadonly(metaT, true); unifiedHook = true
-            print("✅ Unified Hook установлен")
+            print("✅ Unified Hook установлен (v1.9 Marker Logic)")
         end)
         if not ok then warn("❌ Unified Hook: " .. tostring(err)) end
     end
@@ -691,7 +656,7 @@ local function Flunium_Boot()
 
     -- GUI
     local Window = Fluent:CreateWindow({
-        Title = "Flunium Client v2.2",
+        Title = "Flunium Client v2.3",
         SubTitle = "Movement • Aimbots • Silent Aim",
         TabWidth = 160, Size = UDim2.fromOffset(600, 520),
         Acrylic = true, Theme = "Dark", MinimizeKey = Enum.KeyCode.RightControl
@@ -869,15 +834,7 @@ local function Flunium_Boot()
         if settings.ListeningForAimBind and input.UserInputType == Enum.UserInputType.Keyboard then settings.aimKey = input.KeyCode; settings.ListeningForAimBind = false; pcall(function() aimBindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end); return end
         if settings.aim2ListeningForBind and input.UserInputType == Enum.UserInputType.Keyboard then settings.aim2Key = input.KeyCode; settings.aim2ListeningForBind = false; pcall(function() aim2BindButton:SetTitle("🎹 BIND: " .. input.KeyCode.Name) end); return end
         
-        -- FLY KEYBIND LOGIC
-        if flyState.MasterEnabled and input.KeyCode == flyState.Key then
-            if flyState.Mode == "Toggle" then
-                toggleFly(not flyState.Enabled)
-            else
-                toggleFly(true)
-            end
-        end
-        
+        if flyState.MasterEnabled and input.KeyCode == flyState.Key then if flyState.Mode == "Toggle" then toggleFly(not flyState.Enabled) else toggleFly(true) end end
         if silentAim.MasterEnabled and silentAim.Mode == "Toggle" and input.KeyCode == silentAim.HoldKey then silentAim.Enabled = not silentAim.Enabled end
         if aimbotEnabled and input.KeyCode == settings.aimKey then if settings.aimMode == "Hold" then aiming = true else aiming = not aiming; if not aiming then currentTarget = nil; stickyTarget = nil end end end
         if aim2Enabled and input.KeyCode == settings.aim2Key then if settings.aim2Mode == "Hold" then aim2ing = true else aim2ing = not aim2ing; if not aim2ing then aim2Target = nil end end end
@@ -885,11 +842,7 @@ local function Flunium_Boot()
 
     UserInputService.InputEnded:Connect(function(input, gp)
         if gp then return end
-        -- FLY HOLD RELEASE
-        if flyState.MasterEnabled and input.KeyCode == flyState.Key then
-            if flyState.Mode == "Hold" then toggleFly(false) end
-        end
-        
+        if flyState.MasterEnabled and input.KeyCode == flyState.Key then if flyState.Mode == "Hold" then toggleFly(false) end end
         if aimbotEnabled and settings.aimMode == "Hold" and input.KeyCode == settings.aimKey then aiming = false; currentTarget = nil; stickyTarget = nil end
         if aim2Enabled and settings.aim2Mode == "Hold" and input.KeyCode == settings.aim2Key then aim2ing = false; aim2Target = nil end
     end)
@@ -925,12 +878,7 @@ local function Flunium_Boot()
     end)
 
     local bindFile = "FluniumClient/binds.json"
-    local function saveBinds()
-        pcall(function()
-            local data = {aimKey = settings.aimKey.Name, aim2Key = settings.aim2Key.Name, silentKey = silentAim.HoldKey.Name, markerKey = markerClick.ModifierKey.Name, flyKey = flyState.Key.Name}
-            if writefile then writefile(bindFile, HttpService:JSONEncode(data)) end
-        end)
-    end
+    local function saveBinds() pcall(function() local data = {aimKey = settings.aimKey.Name, aim2Key = settings.aim2Key.Name, silentKey = silentAim.HoldKey.Name, markerKey = markerClick.ModifierKey.Name, flyKey = flyState.Key.Name}; if writefile then writefile(bindFile, HttpService:JSONEncode(data)) end end) end
     local function loadBinds()
         pcall(function()
             if isfile and isfile(bindFile) then
@@ -940,11 +888,7 @@ local function Flunium_Boot()
                 if data.silentKey then silentAim.HoldKey = Enum.KeyCode[data.silentKey] or silentAim.HoldKey end
                 if data.markerKey then markerClick.ModifierKey = Enum.KeyCode[data.markerKey] or markerClick.ModifierKey end
                 if data.flyKey then flyState.Key = Enum.KeyCode[data.flyKey] or flyState.Key end
-                pcall(function() aimBindButton:SetTitle("🎹 BIND: " .. settings.aimKey.Name) end)
-                pcall(function() aim2BindButton:SetTitle("🎹 BIND: " .. settings.aim2Key.Name) end)
-                pcall(function() silentBindButton:SetTitle("🎹 BIND: " .. silentAim.HoldKey.Name) end)
-                pcall(function() markerBindBtn:SetTitle("🎹 Modifier: " .. markerClick.ModifierKey.Name) end)
-                pcall(function() flyBindBtn:SetTitle("🎹 BIND: " .. flyState.Key.Name) end)
+                pcall(function() aimBindButton:SetTitle("🎹 BIND: " .. settings.aimKey.Name) end); pcall(function() aim2BindButton:SetTitle("🎹 BIND: " .. settings.aim2Key.Name) end); pcall(function() silentBindButton:SetTitle("🎹 BIND: " .. silentAim.HoldKey.Name) end); pcall(function() markerBindBtn:SetTitle("🎹 Modifier: " .. markerClick.ModifierKey.Name) end); pcall(function() flyBindBtn:SetTitle("🎹 BIND: " .. flyState.Key.Name) end)
             end
         end)
     end
@@ -957,9 +901,9 @@ local function Flunium_Boot()
     UserInputService.InputBegan:Connect(function(input, gp) if gp then return end; task.delay(0.1, saveBinds) end)
 
     print("====================================")
-    print("✅ Flunium Client v2.2 загружен!")
-    print("✈️ Fly: AlignPosition, до 1000 studs/s, вкладка Movement")
-    print("👁️ Все вкладки восстановлены")
+    print("✅ Flunium Client v2.3 загружен!")
+    print("🌀 Kunai Marker: v1.9 логика (debugLog + replaceVectorInTable)")
+    print("✈️ Fly: AlignPosition, Movement tab")
     print("====================================")
 
     getgenv().FluniumLoaded = true
